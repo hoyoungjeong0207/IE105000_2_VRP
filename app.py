@@ -132,17 +132,19 @@ def draw_map(routes, active_vehicle, locations, shipments, vehicles, highlight_c
         for s in stops:
             assigned[s] = vid
 
-    # 1. Dashed lines: shipment pairs
-    for sid, sh in shipments.items():
-        p = locations[sh["pickup"]]
-        d = locations[sh["delivery"]]
-        color = pair_color(sh["pair_num"])
-        fig.add_trace(go.Scatter(
-            x=[p["x"], d["x"]], y=[p["y"], d["y"]],
-            mode="lines",
-            line=dict(color=color, width=1, dash="dot"),
-            hoverinfo="skip", showlegend=False,
-        ))
+    # 1. Legend entries for node shapes
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None], mode="markers",
+        marker=dict(symbol="circle", size=12, color="#94a3b8"),
+        name="● 동그라미 = 픽업 (Pickup)",
+        showlegend=True, hoverinfo="skip",
+    ))
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None], mode="markers",
+        marker=dict(symbol="diamond", size=12, color="#94a3b8"),
+        name="◆ 마름모 = 배송 (Delivery)",
+        showlegend=True, hoverinfo="skip",
+    ))
 
     # 2. Route lines per vehicle
     for vid, stop_ids in routes.items():
