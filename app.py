@@ -99,6 +99,7 @@ def _init_state():
         "vrp_optimal":        None,
         "vrp_score":          0,
         "vrp_student_name":   "",
+        "vrp_goto_solution":  False,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -561,8 +562,8 @@ def tab_plan():
                     st.session_state.vrp_evaluation = eval_result
                     st.session_state.vrp_optimal    = optimal
                     st.session_state.vrp_score      = score
-                    st.session_state.vrp_submitted  = True
-                    st.toast("✅ Submitted! See Solution tab.", icon="🚚")
+                    st.session_state.vrp_submitted       = True
+                    st.session_state.vrp_goto_solution   = True
                     st.rerun()
         else:
             st.markdown('<div class="warn-box"><b>⚠ Violations detected:</b></div>', unsafe_allow_html=True)
@@ -714,6 +715,19 @@ def tab_leaderboard():
 # ══════════════════════════════════════════════════════════════════════════════
 def main():
     st.title("🚚 Pickup & Delivery VRP Game — IE105000")
+
+    # Auto-switch to Solution tab after submit
+    if st.session_state.get("vrp_goto_solution"):
+        st.session_state.vrp_goto_solution = False
+        st.components.v1.html("""
+        <script>
+            setTimeout(function() {
+                var tabs = window.parent.document.querySelectorAll('[data-baseweb="tab"]');
+                if (tabs.length >= 2) tabs[1].click();
+            }, 100);
+        </script>
+        """, height=0)
+
     tabs = st.tabs(["🚚 Plan Routes", "📊 Solution"])
     with tabs[0]: tab_plan()
     with tabs[1]: tab_solution()
