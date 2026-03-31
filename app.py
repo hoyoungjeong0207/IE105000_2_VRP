@@ -136,13 +136,13 @@ def draw_map(routes, active_vehicle, locations, shipments, vehicles, highlight_c
     fig.add_trace(go.Scatter(
         x=[None], y=[None], mode="markers",
         marker=dict(symbol="circle", size=12, color="#94a3b8"),
-        name="● 동그라미 = 픽업 (Pickup)",
+        name="● Pickup",
         showlegend=True, hoverinfo="skip",
     ))
     fig.add_trace(go.Scatter(
         x=[None], y=[None], mode="markers",
         marker=dict(symbol="diamond", size=12, color="#94a3b8"),
-        name="◆ 마름모 = 배송 (Delivery)",
+        name="◆ Delivery",
         showlegend=True, hoverinfo="skip",
     ))
 
@@ -324,153 +324,58 @@ def _render_route_panel(vehicle_id):
         st.markdown('<div class="ok-box">✓ Valid so far</div>', unsafe_allow_html=True)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# START SCREEN
-# ══════════════════════════════════════════════════════════════════════════════
-def show_start_screen():
-    st.title("🚚 Pickup & Delivery VRP Game")
-    st.markdown(
-        "Plan routes for delivery vehicles to pick up and deliver shipments "
-        "across a 10×10 km city. Minimise total travel distance!"
-    )
-    st.markdown("---")
-
-    col_left, col_mid, col_right = st.columns([1, 2, 1])
-    with col_mid:
-        st.markdown('<div class="start-card">', unsafe_allow_html=True)
-        st.subheader("Game Settings")
-        st.markdown("")
-
-        num_vehicles = st.slider(
-            "Number of Vehicles", min_value=1, max_value=3,
-            value=st.session_state.vrp_num_vehicles,
-            help="How many vehicles are available for delivery",
-        )
-        num_shipments = st.slider(
-            "Number of Shipments (OD pairs)", min_value=2, max_value=6,
-            value=st.session_state.vrp_num_shipments,
-            help="Each shipment has one pickup location and one delivery location",
-        )
-
-        cap = math.ceil(num_shipments / num_vehicles) + 1
-        st.markdown(
-            f'<div class="info-box">Each vehicle capacity: <b>{cap} shipments</b></div>',
-            unsafe_allow_html=True,
-        )
-        st.markdown("")
-
-        name_input = st.text_input(
-            "Your Name",
-            value=st.session_state.vrp_student_name,
-            placeholder="Enter your name...",
-        )
-
-        st.markdown("")
-        if st.button("🚀 Start Game", type="primary", use_container_width=True):
-            seed = random.randint(0, 99999)
-            locations, shipments, vehicles = generate_scenario(num_vehicles, num_shipments, seed)
-            st.session_state.vrp_num_vehicles  = num_vehicles
-            st.session_state.vrp_num_shipments = num_shipments
-            st.session_state.vrp_seed          = seed
-            st.session_state.vrp_locations     = locations
-            st.session_state.vrp_shipments     = shipments
-            st.session_state.vrp_vehicles      = vehicles
-            st.session_state.vrp_routes        = {vid: [] for vid in vehicles}
-            st.session_state.vrp_active_vehicle = list(vehicles.keys())[0]
-            st.session_state.vrp_submitted      = False
-            st.session_state.vrp_evaluation     = None
-            st.session_state.vrp_optimal        = None
-            st.session_state.vrp_score          = 0
-            st.session_state.vrp_student_name   = name_input.strip()
-            st.session_state.vrp_game_started   = True
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    # Show location pool table
-    st.markdown("---")
-    st.subheader("Location Pool")
-    st.markdown("Shipment origins and destinations will be randomly chosen from these locations:")
-    pool_data = [{"Location": l["icon"] + " " + l["name"], "X": l["x"], "Y": l["y"]} for l in LOCATION_POOL]
-    col_a, col_b = st.columns(2)
-    mid = len(pool_data) // 2
-    with col_a:
-        st.dataframe(pd.DataFrame(pool_data[:mid]), use_container_width=True, hide_index=True)
-    with col_b:
-        st.dataframe(pd.DataFrame(pool_data[mid:]), use_container_width=True, hide_index=True)
+def _start_game(num_vehicles, num_shipments, name):
+    seed = random.randint(0, 99999)
+    locations, shipments, vehicles = generate_scenario(num_vehicles, num_shipments, seed)
+    st.session_state.vrp_num_vehicles   = num_vehicles
+    st.session_state.vrp_num_shipments  = num_shipments
+    st.session_state.vrp_seed           = seed
+    st.session_state.vrp_locations      = locations
+    st.session_state.vrp_shipments      = shipments
+    st.session_state.vrp_vehicles       = vehicles
+    st.session_state.vrp_routes         = {vid: [] for vid in vehicles}
+    st.session_state.vrp_active_vehicle = list(vehicles.keys())[0]
+    st.session_state.vrp_submitted      = False
+    st.session_state.vrp_evaluation     = None
+    st.session_state.vrp_optimal        = None
+    st.session_state.vrp_score          = 0
+    st.session_state.vrp_student_name   = name.strip()
+    st.session_state.vrp_game_started   = True
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # GAME TABS
 # ══════════════════════════════════════════════════════════════════════════════
-def tab_scenario():
-    locations, shipments, vehicles = _sc()
-
-    st.header("Scenario")
-    col1, col2 = st.columns([3, 2])
-
-    with col1:
-        empty_routes = {vid: [] for vid in vehicles}
-        fig = draw_map(empty_routes, list(vehicles.keys())[0], locations, shipments, vehicles, highlight_clickable=False)
-        fig.update_layout(title="All Pickup & Delivery Locations", height=460)
-        st.plotly_chart(fig, use_container_width=True, key="scenario_map", config={"displayModeBar": False})
-
-    with col2:
-        st.subheader("Depot")
-        st.markdown(
-            f'<div class="vrp-card"><h4>🏭 {DEPOT["name"]}</h4>'
-            f'<p>All vehicles start and end here<br>Coords: ({DEPOT["x"]}, {DEPOT["y"]})</p></div>',
-            unsafe_allow_html=True,
-        )
-        st.subheader("Vehicles")
-        for vid, veh in vehicles.items():
-            st.markdown(
-                f'<div class="vrp-card" style="border-left:4px solid {veh["color"]}">'
-                f'<h4 style="color:{veh["color"]}">🚚 {veh["name"]}</h4>'
-                f'<p>Capacity: {veh["capacity"]} shipments</p></div>',
-                unsafe_allow_html=True,
-            )
-
-    st.subheader("Shipments")
-    rows = []
-    for sid, sh in shipments.items():
-        p = locations[sh["pickup"]]
-        d = locations[sh["delivery"]]
-        rows.append({
-            "#": sh["pair_num"],
-            "Pickup": f"{p['icon']} {p['name']} ({p['x']},{p['y']})",
-            "Delivery": f"{d['icon']} {d['name']} ({d['x']},{d['y']})",
-        })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
-    st.subheader("Rules")
-    cap_example = list(vehicles.values())[0]["capacity"]
-    st.markdown(f"""
-| Constraint | Description |
-|---|---|
-| **Precedence** | For each shipment, pick up **before** delivering |
-| **Capacity** | Each vehicle carries at most **{cap_example} shipments** at once |
-| **Coverage** | Every shipment's pickup AND delivery go to the **same vehicle** |
-| **Routing** | Every route starts and ends at the **Warehouse** |
-
-**Objective:** Minimise **total travel distance** (sum of all vehicle routes).
-
-**Score = min(1000, round(1000 × optimal_distance / your_distance))**
-A score of 1000 means you matched or beat the optimal solution.
-""")
 
 
 def tab_plan():
+    # ── Game settings panel (always visible at top) ──────────────────────────
+    with st.expander("⚙️ Game Settings", expanded=not st.session_state.vrp_game_started):
+        s_col1, s_col2, s_col3, s_col4 = st.columns([2, 2, 2, 1])
+        with s_col1:
+            num_vehicles = st.slider("Vehicles", 1, 3, st.session_state.vrp_num_vehicles, key="cfg_vehicles")
+        with s_col2:
+            num_shipments = st.slider("Shipments", 2, 6, st.session_state.vrp_num_shipments, key="cfg_shipments")
+        with s_col3:
+            name_cfg = st.text_input("Your Name", value=st.session_state.vrp_student_name,
+                                     placeholder="Enter your name...", key="cfg_name")
+        with s_col4:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🚀 Start", type="primary", use_container_width=True, key="cfg_start"):
+                _start_game(num_vehicles, num_shipments, name_cfg)
+                st.rerun()
+
+    if not st.session_state.vrp_game_started:
+        st.info("Configure your game above and press **Start**.")
+        return
+
     locations, shipments, vehicles = _sc()
     vehicle_ids = list(vehicles.keys())
 
-    # ── Name input + reset ───────────────────────────────────────────────────
-    nc, _, rc = st.columns([3, 3, 1])
-    with nc:
-        name = st.text_input("Your name", value=st.session_state.vrp_student_name, key="name_input")
-        st.session_state.vrp_student_name = name
+    # ── Reset button ─────────────────────────────────────────────────────────
+    _, rc = st.columns([5, 1])
     with rc:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🔄 Reset", use_container_width=True):
+        if st.button("🔄 Reset Routes", use_container_width=True):
             st.session_state.vrp_routes    = {vid: [] for vid in vehicles}
             st.session_state.vrp_submitted = False
             st.session_state.vrp_evaluation = None
@@ -478,7 +383,7 @@ def tab_plan():
             st.rerun()
 
     if st.session_state.vrp_submitted:
-        st.info("✅ Already submitted. Reset to try again.")
+        st.info("✅ Already submitted. Reset routes or start a new game to try again.")
         return
 
     # ── Vehicle selector buttons ─────────────────────────────────────────────
@@ -789,14 +694,10 @@ def tab_leaderboard():
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════════
 def main():
-    if not st.session_state.vrp_game_started:
-        show_start_screen()
-        return
-
-    tabs = st.tabs(["📦 Scenario", "🚚 Plan Routes", "📊 Solution"])
-    with tabs[0]: tab_scenario()
-    with tabs[1]: tab_plan()
-    with tabs[2]: tab_solution()
+    st.title("🚚 Pickup & Delivery VRP Game — IE105000")
+    tabs = st.tabs(["🚚 Plan Routes", "📊 Solution"])
+    with tabs[0]: tab_plan()
+    with tabs[1]: tab_solution()
 
 
 if __name__ == "__main__" or True:
