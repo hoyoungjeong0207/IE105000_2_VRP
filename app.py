@@ -6,11 +6,6 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-try:
-    import db as _db
-    _DB_AVAILABLE = True
-except Exception:
-    _DB_AVAILABLE = False
 
 from engine import check_route, evaluate_solution, route_distance, dist, get_loc
 from scenario import (
@@ -363,7 +358,7 @@ def show_start_screen():
         st.markdown("")
 
         name_input = st.text_input(
-            "Your Name (for leaderboard)",
+            "Your Name",
             value=st.session_state.vrp_student_name,
             placeholder="Enter your name...",
         )
@@ -640,19 +635,6 @@ def tab_plan():
                         st.session_state.vrp_submitted  = True
                         st.session_state.vrp_student_name = name.strip()
 
-                        if _DB_AVAILABLE:
-                            try:
-                                _db.init_db()
-                                _db.save_solution(
-                                    name.strip(), eval_result,
-                                    optimal["total_distance"], score,
-                                    seed=seed,
-                                    num_vehicles=n_v,
-                                    num_shipments=n_s,
-                                )
-                            except Exception as e:
-                                st.warning(f"Could not save to leaderboard: {e}")
-
                         st.toast("✅ Submitted! See Solution tab.", icon="🚚")
                         st.rerun()
             else:
@@ -809,11 +791,10 @@ def main():
         show_start_screen()
         return
 
-    tabs = st.tabs(["📦 Scenario", "🚚 Plan Routes", "📊 Solution", "🏆 Leaderboard"])
+    tabs = st.tabs(["📦 Scenario", "🚚 Plan Routes", "📊 Solution"])
     with tabs[0]: tab_scenario()
     with tabs[1]: tab_plan()
     with tabs[2]: tab_solution()
-    with tabs[3]: tab_leaderboard()
 
 
 if __name__ == "__main__" or True:
