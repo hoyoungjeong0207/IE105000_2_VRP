@@ -527,8 +527,9 @@ def tab_plan():
                 st.markdown('<div class="ok-box"><b>✅ All assigned — Ready to Submit!</b></div>', unsafe_allow_html=True)
                 st.markdown(f"**Total distance:** {eval_result['total_distance']:.2f} km")
 
-                if not name.strip():
-                    st.warning("Enter your name first.")
+                student_name = st.session_state.vrp_student_name
+                if not student_name.strip():
+                    st.warning("Enter your name in Game Settings first.")
                 else:
                     if st.button("🚀 Submit", type="primary", use_container_width=True):
                         seed = st.session_state.vrp_seed
@@ -540,7 +541,6 @@ def tab_plan():
                         st.session_state.vrp_optimal    = optimal
                         st.session_state.vrp_score      = score
                         st.session_state.vrp_submitted  = True
-                        st.session_state.vrp_student_name = name.strip()
 
                         st.toast("✅ Submitted! See Solution tab.", icon="🚚")
                         st.rerun()
