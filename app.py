@@ -46,14 +46,38 @@ st.markdown("""
 .vrp-card h4 { margin: 0 0 0.3rem 0; font-size: 0.95rem; color: #f1f5f9; }
 .vrp-card p  { margin: 0; font-size: 0.82rem; color: #94a3b8; }
 .warn-box { background:#1f0f0f; border:1px solid #f87171; border-radius:6px;
-    padding:0.4rem 0.7rem; margin:0.25rem 0; font-size:0.82rem; color:#fca5a5; }
+    padding:0.5rem 0.8rem; margin:0.3rem 0; font-size:0.85rem; color:#fca5a5; }
 .ok-box   { background:#0f1f0f; border:1px solid #4ade80; border-radius:6px;
-    padding:0.4rem 0.7rem; margin:0.25rem 0; font-size:0.82rem; color:#86efac; }
+    padding:0.5rem 0.8rem; margin:0.3rem 0; font-size:0.85rem; color:#86efac; }
 .info-box { background:#0f172a; border:1px solid #60a5fa; border-radius:6px;
-    padding:0.4rem 0.7rem; margin:0.25rem 0; font-size:0.82rem; color:#93c5fd; }
-.score-big { font-size:3rem; font-weight:700; text-align:center; color:#f1f5f9; }
-.start-card { background:#1e293b; border:2px solid #334155; border-radius:12px;
-    padding:2rem; max-width:480px; margin:0 auto; }
+    padding:0.5rem 0.8rem; margin:0.3rem 0; font-size:0.85rem; color:#93c5fd; }
+.score-big { font-size:2.5rem; font-weight:700; text-align:center; color:#f1f5f9; }
+.pair-legend { display:flex; flex-wrap:wrap; gap:0.4rem 1rem;
+    font-size:0.78rem; color:#94a3b8; margin:0.3rem 0 0.6rem 0; }
+
+/* ── Mobile: stack all Streamlit columns ── */
+@media (max-width: 768px) {
+    [data-testid="stHorizontalBlock"] {
+        flex-direction: column !important;
+        gap: 0.3rem !important;
+    }
+    [data-testid="stColumn"] {
+        width: 100% !important;
+        flex: 1 1 100% !important;
+        min-width: 100% !important;
+    }
+    /* Bigger tap targets for buttons */
+    .stButton > button {
+        min-height: 2.8rem !important;
+        font-size: 0.95rem !important;
+    }
+    /* Smaller title on mobile */
+    h1 { font-size: 1.4rem !important; }
+    h2 { font-size: 1.2rem !important; }
+    h3 { font-size: 1.05rem !important; }
+    /* Reduce plotly chart padding */
+    [data-testid="stPlotlyChart"] { padding: 0 !important; }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -410,70 +434,77 @@ def tab_plan():
 
     st.markdown("---")
 
-    # ── Map + controls ───────────────────────────────────────────────────────
-    map_col, ctrl_col = st.columns([3, 2])
     routes   = st.session_state.vrp_routes
     active_v = st.session_state.vrp_active_vehicle
     assigned = _assigned_to()
 
-    with map_col:
-        fig = draw_map(routes, active_v, locations, shipments, vehicles, highlight_clickable=True)
+    # ── Map (full width) ─────────────────────────────────────────────────────
+    fig = draw_map(routes, active_v, locations, shipments, vehicles, highlight_clickable=True)
+    fig.update_layout(height=420, margin=dict(l=30, r=30, t=10, b=30))
 
-        # Pair legend below map
-        legend_html = " &nbsp; ".join(
-            f'<span style="color:{pair_color(sh["pair_num"])};font-weight:bold">'
-            f'{sh["pair_num"]}P/{sh["pair_num"]}D = {locations[sh["pickup"]]["icon"]} {locations[sh["pickup"]]["name"]} → '
-            f'{locations[sh["delivery"]]["icon"]} {locations[sh["delivery"]]["name"]}</span>'
-            for sh in shipments.values()
-        )
+    # Pair legend
+    items = "".join(
+        f'<span style="color:{pair_color(sh["pair_num"])};font-weight:bold;white-space:nowrap">'
+        f'{sh["pair_num"]}P/{sh["pair_num"]}D: '
+        f'{locations[sh["pickup"]]["icon"]}{locations[sh["pickup"]]["name"]} → '
+        f'{locations[sh["delivery"]]["icon"]}{locations[sh["delivery"]]["name"]}'
+        f'</span>'
+        for sh in shipments.values()
+    )
+    st.markdown(f'<div class="pair-legend">{items}</div>', unsafe_allow_html=True)
 
-        event = st.plotly_chart(
-            fig, use_container_width=True, key="plan_map",
-            on_select="rerun", selection_mode=("points",),
-            config={"displayModeBar": False},
-        )
-        st.markdown(f'<p style="font-size:0.78rem;color:#94a3b8;margin-top:0">{legend_html}</p>', unsafe_allow_html=True)
+    event = st.plotly_chart(
+        fig, use_container_width=True, key="plan_map",
+        on_select="rerun", selection_mode=("points",),
+        config={"displayModeBar": False},
+    )
+    st.caption("Tap a node to add it to the active vehicle's route.")
 
-        # Handle click
-        if event and hasattr(event, "selection") and event.selection:
-            points = event.selection.get("points", [])
-            if points:
-                cd = points[0].get("customdata")
-                loc_id = (cd[0] if isinstance(cd, (list, tuple)) else cd) if cd is not None else None
-                if loc_id and loc_id != "depot":
-                    loc = locations.get(loc_id)
-                    if loc:
-                        av = st.session_state.vrp_active_vehicle
-                        cur_route = st.session_state.vrp_routes[av]
-                        other_vs = [v for v in vehicle_ids if v != av]
-                        in_other = any(loc_id in st.session_state.vrp_routes[v] for v in other_vs)
+    # Handle click
+    if event and hasattr(event, "selection") and event.selection:
+        points = event.selection.get("points", [])
+        if points:
+            cd = points[0].get("customdata")
+            loc_id = (cd[0] if isinstance(cd, (list, tuple)) else cd) if cd is not None else None
+            if loc_id and loc_id != "depot":
+                loc = locations.get(loc_id)
+                if loc:
+                    av = st.session_state.vrp_active_vehicle
+                    cur_route = st.session_state.vrp_routes[av]
+                    other_vs = [v for v in vehicle_ids if v != av]
+                    in_other = any(loc_id in st.session_state.vrp_routes[v] for v in other_vs)
 
-                        if loc_id in cur_route:
-                            st.warning(f"Already in {vehicles[av]['name']}'s route.")
-                        elif in_other:
-                            st.warning("Already assigned to another vehicle.")
-                        elif loc["type"] == "delivery":
-                            pid = shipments[loc["shipment"]]["pickup"]
-                            if pid not in cur_route:
-                                pname = locations[pid]["name"]
-                                st.error(f"Must pick up '{pname}' first.")
-                            else:
-                                st.session_state.vrp_routes[av].append(loc_id)
-                                st.rerun()
+                    if loc_id in cur_route:
+                        st.warning(f"Already in {vehicles[av]['name']}'s route.")
+                    elif in_other:
+                        st.warning("Already assigned to another vehicle.")
+                    elif loc["type"] == "delivery":
+                        pid = shipments[loc["shipment"]]["pickup"]
+                        if pid not in cur_route:
+                            st.error(f"Pick up '{locations[pid]['name']}' first.")
                         else:
-                            pickups_in = sum(1 for s in cur_route if locations[s]["type"] == "pickup")
-                            if pickups_in >= vehicles[av]["capacity"]:
-                                st.error(f"{vehicles[av]['name']} at capacity.")
-                            else:
-                                st.session_state.vrp_routes[av].append(loc_id)
-                                st.rerun()
+                            st.session_state.vrp_routes[av].append(loc_id)
+                            st.rerun()
+                    else:
+                        pickups_in = sum(1 for s in cur_route if locations[s]["type"] == "pickup")
+                        if pickups_in >= vehicles[av]["capacity"]:
+                            st.error(f"{vehicles[av]['name']} at capacity.")
+                        else:
+                            st.session_state.vrp_routes[av].append(loc_id)
+                            st.rerun()
 
-        st.caption("Click a node to add it to the active vehicle's route. Circles = pickups, diamonds = deliveries.")
+    st.markdown("---")
 
-    with ctrl_col:
-        st.markdown("#### Route Details")
+    # ── Route details (below map, stacks on mobile) ───────────────────────────
+    all_loc_ids = list(locations.keys())
+    n_assigned  = sum(1 for l in all_loc_ids if l in assigned)
+    n_total     = len(all_loc_ids)
+    st.progress(n_assigned / n_total if n_total else 0, text=f"{n_assigned}/{n_total} stops assigned")
 
-        for vid in vehicle_ids:
+    # Per-vehicle panels in columns (stack on mobile via CSS)
+    veh_panel_cols = st.columns(len(vehicle_ids))
+    for i, vid in enumerate(vehicle_ids):
+        with veh_panel_cols[i]:
             _render_route_panel(vid)
             u_col, c_col = st.columns(2)
             with u_col:
@@ -482,75 +513,63 @@ def tab_plan():
                         st.session_state.vrp_routes[vid].pop()
                         st.rerun()
             with c_col:
-                vnum = vid[1]
-                if st.button(f"🗑 Clear V{vnum}", key=f"clear_{vid}", use_container_width=True):
+                if st.button(f"🗑 Clear", key=f"clear_{vid}", use_container_width=True):
                     st.session_state.vrp_routes[vid] = []
                     st.rerun()
-            st.markdown("")
 
-        st.markdown("---")
+    st.markdown("---")
 
-        # Progress
-        all_loc_ids = list(locations.keys())
-        n_assigned = sum(1 for l in all_loc_ids if l in assigned)
-        n_total = len(all_loc_ids)
-        st.progress(n_assigned / n_total if n_total else 0, text=f"{n_assigned}/{n_total} stops assigned")
+    # Shipment checklist
+    for sid, sh in shipments.items():
+        pid, did = sh["pickup"], sh["delivery"]
+        p_done = pid in assigned
+        d_done = did in assigned
+        pnum   = sh["pair_num"]
+        c      = pair_color(pnum)
+        p_veh  = assigned.get(pid, "")
+        d_veh  = assigned.get(did, "")
 
-        # Shipment checklist
-        for sid, sh in shipments.items():
-            pid, did = sh["pickup"], sh["delivery"]
-            p_done = pid in assigned
-            d_done = did in assigned
-            pnum = sh["pair_num"]
-            c = pair_color(pnum)
-            p_veh = assigned.get(pid, "")
-            d_veh = assigned.get(did, "")
-
-            if p_done and d_done and p_veh == d_veh:
-                label = f'✓ <b style="color:{c}">Shipment {pnum}</b> — {vehicles[p_veh]["name"]}'
-                st.markdown(f'<div class="ok-box">{label}</div>', unsafe_allow_html=True)
-            elif p_done and d_done and p_veh != d_veh:
-                st.markdown(f'<div class="warn-box">⚠ Shipment {pnum} split across vehicles!</div>', unsafe_allow_html=True)
-            elif p_done:
-                st.markdown(f'<div class="info-box"><b style="color:{c}">Shipment {pnum}</b>: pickup ✓, delivery missing</div>', unsafe_allow_html=True)
-            elif d_done:
-                st.markdown(f'<div class="warn-box">⚠ Shipment {pnum}: delivery added but pickup missing!</div>', unsafe_allow_html=True)
-            else:
-                st.markdown(f'<p style="color:#94a3b8;font-size:0.82rem;margin:2px 0">○ <b style="color:{c}">Shipment {pnum}</b>: not assigned</p>', unsafe_allow_html=True)
-
-        st.markdown("")
-
-        # Submit
-        if _all_assigned():
-            eval_result = evaluate_solution(routes, locations, shipments, vehicles)
-            if eval_result["feasible"]:
-                st.markdown('<div class="ok-box"><b>✅ All assigned — Ready to Submit!</b></div>', unsafe_allow_html=True)
-                st.markdown(f"**Total distance:** {eval_result['total_distance']:.2f} km")
-
-                student_name = st.session_state.vrp_student_name
-                if not student_name.strip():
-                    st.warning("Enter your name in Game Settings first.")
-                else:
-                    if st.button("🚀 Submit", type="primary", use_container_width=True):
-                        seed = st.session_state.vrp_seed
-                        n_v  = st.session_state.vrp_num_vehicles
-                        n_s  = st.session_state.vrp_num_shipments
-                        optimal = _cached_solve(seed, n_v, n_s)
-                        score = _compute_score(eval_result["total_distance"], optimal["total_distance"])
-                        st.session_state.vrp_evaluation = eval_result
-                        st.session_state.vrp_optimal    = optimal
-                        st.session_state.vrp_score      = score
-                        st.session_state.vrp_submitted  = True
-
-                        st.toast("✅ Submitted! See Solution tab.", icon="🚚")
-                        st.rerun()
-            else:
-                st.markdown('<div class="warn-box"><b>⚠ Violations detected:</b></div>', unsafe_allow_html=True)
-                for v in eval_result["violations"][:5]:
-                    st.markdown(f'<div class="warn-box">• {v}</div>', unsafe_allow_html=True)
+        if p_done and d_done and p_veh == d_veh:
+            st.markdown(f'<div class="ok-box">✓ <b style="color:{c}">Shipment {pnum}</b> — {vehicles[p_veh]["name"]}</div>', unsafe_allow_html=True)
+        elif p_done and d_done and p_veh != d_veh:
+            st.markdown(f'<div class="warn-box">⚠ Shipment {pnum} split across vehicles!</div>', unsafe_allow_html=True)
+        elif p_done:
+            st.markdown(f'<div class="info-box"><b style="color:{c}">Shipment {pnum}</b>: pickup ✓, delivery missing</div>', unsafe_allow_html=True)
+        elif d_done:
+            st.markdown(f'<div class="warn-box">⚠ Shipment {pnum}: delivery added, pickup missing!</div>', unsafe_allow_html=True)
         else:
-            remaining = n_total - n_assigned
-            st.markdown(f'<div class="info-box">{remaining} more stop(s) to assign.</div>', unsafe_allow_html=True)
+            st.markdown(f'<p style="color:#94a3b8;font-size:0.85rem;margin:2px 0">○ <b style="color:{c}">Shipment {pnum}</b>: not assigned</p>', unsafe_allow_html=True)
+
+    st.markdown("")
+
+    # Submit
+    if _all_assigned():
+        eval_result = evaluate_solution(routes, locations, shipments, vehicles)
+        if eval_result["feasible"]:
+            st.markdown('<div class="ok-box"><b>✅ All assigned — Ready to Submit!</b></div>', unsafe_allow_html=True)
+            st.markdown(f"**Total distance:** {eval_result['total_distance']:.2f} km")
+            student_name = st.session_state.vrp_student_name
+            if not student_name.strip():
+                st.warning("Enter your name in Game Settings first.")
+            else:
+                if st.button("🚀 Submit", type="primary", use_container_width=True):
+                    seed = st.session_state.vrp_seed
+                    n_v  = st.session_state.vrp_num_vehicles
+                    n_s  = st.session_state.vrp_num_shipments
+                    optimal = _cached_solve(seed, n_v, n_s)
+                    score   = _compute_score(eval_result["total_distance"], optimal["total_distance"])
+                    st.session_state.vrp_evaluation = eval_result
+                    st.session_state.vrp_optimal    = optimal
+                    st.session_state.vrp_score      = score
+                    st.session_state.vrp_submitted  = True
+                    st.toast("✅ Submitted! See Solution tab.", icon="🚚")
+                    st.rerun()
+        else:
+            st.markdown('<div class="warn-box"><b>⚠ Violations detected:</b></div>', unsafe_allow_html=True)
+            for v in eval_result["violations"][:5]:
+                st.markdown(f'<div class="warn-box">• {v}</div>', unsafe_allow_html=True)
+    else:
+        st.markdown(f'<div class="info-box">{n_total - n_assigned} more stop(s) to assign.</div>', unsafe_allow_html=True)
 
 
 def tab_solution():
