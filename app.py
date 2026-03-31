@@ -26,20 +26,20 @@ st.set_page_config(
 
 # ── Color palette ─────────────────────────────────────────────────────────────
 _C = {
-    "bg":          "#f8fafc",
-    "grid":        "#e2e8f0",
-    "depot":       "#1e3a5f",
-    "pickup":      "#f97316",   # orange
-    "delivery":    "#16a34a",   # green
-    "v1":          "#3b82f6",   # blue
-    "v2":          "#f59e0b",   # amber
+    "bg":          "#0f172a",
+    "grid":        "#1e293b",
+    "depot":       "#93c5fd",
+    "pickup":      "#fb923c",   # orange
+    "delivery":    "#4ade80",   # green
+    "v1":          "#60a5fa",   # blue
+    "v2":          "#fbbf24",   # amber
     "unassigned":  "#94a3b8",
-    "text":        "#0f172a",
-    "subtext":     "#64748b",
-    "border":      "#cbd5e1",
-    "warn":        "#ef4444",
-    "ok":          "#22c55e",
-    "card_bg":     "#ffffff",
+    "text":        "#f1f5f9",
+    "subtext":     "#94a3b8",
+    "border":      "#334155",
+    "warn":        "#f87171",
+    "ok":          "#4ade80",
+    "card_bg":     "#1e293b",
 }
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
@@ -47,48 +47,48 @@ st.markdown(
     """
     <style>
     .vrp-card {
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
+        background: #1e293b;
+        border: 1px solid #334155;
         border-radius: 8px;
         padding: 1rem 1.2rem;
         margin-bottom: 0.75rem;
     }
-    .vrp-card h4 { margin: 0 0 0.4rem 0; font-size: 1rem; color: #0f172a; }
-    .vrp-card p  { margin: 0; font-size: 0.85rem; color: #64748b; }
-    .route-v1 { border-left: 4px solid #3b82f6; }
-    .route-v2 { border-left: 4px solid #f59e0b; }
+    .vrp-card h4 { margin: 0 0 0.4rem 0; font-size: 1rem; color: #f1f5f9; }
+    .vrp-card p  { margin: 0; font-size: 0.85rem; color: #94a3b8; }
+    .route-v1 { border-left: 4px solid #60a5fa; }
+    .route-v2 { border-left: 4px solid #fbbf24; }
     .warn-box {
-        background: #fef2f2;
-        border: 1px solid #fca5a5;
+        background: #1f0f0f;
+        border: 1px solid #f87171;
         border-radius: 6px;
         padding: 0.5rem 0.75rem;
         margin: 0.3rem 0;
         font-size: 0.85rem;
-        color: #dc2626;
+        color: #fca5a5;
     }
     .ok-box {
-        background: #f0fdf4;
-        border: 1px solid #86efac;
+        background: #0f1f0f;
+        border: 1px solid #4ade80;
         border-radius: 6px;
         padding: 0.5rem 0.75rem;
         margin: 0.3rem 0;
         font-size: 0.85rem;
-        color: #15803d;
+        color: #86efac;
     }
     .info-box {
-        background: #eff6ff;
-        border: 1px solid #93c5fd;
+        background: #0f172a;
+        border: 1px solid #60a5fa;
         border-radius: 6px;
         padding: 0.5rem 0.75rem;
         margin: 0.3rem 0;
         font-size: 0.85rem;
-        color: #1d4ed8;
+        color: #93c5fd;
     }
     .score-big {
         font-size: 3rem;
         font-weight: 700;
         text-align: center;
-        color: #0f172a;
+        color: #f1f5f9;
     }
     .rank-medal { font-size: 1.4rem; }
     </style>
@@ -258,7 +258,7 @@ def draw_map(routes, active_vehicle, highlight_clickable=True):
             line_color = _C["pickup"] if gname == "pickup" else _C["delivery"]
             line_width = 2
         else:
-            line_color = "white"
+            line_color = "#0f172a"
             line_width = 1.5
 
         fig.add_trace(go.Scatter(
@@ -288,7 +288,7 @@ def draw_map(routes, active_vehicle, highlight_clickable=True):
             symbol="square",
             size=20,
             color=_C["depot"],
-            line=dict(color="white", width=2),
+            line=dict(color="#0f172a", width=2),
         ),
         customdata=[["depot"]],
         hovertext=[f"<b>🏭 {DEPOT['name']}</b><br>Depot (start/end)<br>Coords: ({DEPOT['x']}, {DEPOT['y']})"],
@@ -306,7 +306,7 @@ def draw_map(routes, active_vehicle, highlight_clickable=True):
         text=f"<b>{DEPOT['name']}</b>",
         showarrow=False,
         font=dict(size=10, color=_C["depot"]),
-        bgcolor="rgba(255,255,255,0.8)",
+        bgcolor="rgba(15,23,42,0.85)",
         borderpad=2,
     ))
 
@@ -340,7 +340,7 @@ def draw_map(routes, active_vehicle, highlight_clickable=True):
             text=label_text,
             showarrow=False,
             font=dict(size=9, color=fc),
-            bgcolor="rgba(255,255,255,0.85)",
+            bgcolor="rgba(15,23,42,0.85)",
             borderpad=2,
         ))
 
@@ -373,7 +373,7 @@ def draw_map(routes, active_vehicle, highlight_clickable=True):
         legend=dict(
             orientation="v",
             x=1.01, y=1,
-            bgcolor="rgba(255,255,255,0.9)",
+            bgcolor="rgba(15,23,42,0.9)",
             bordercolor=_C["border"],
             borderwidth=1,
             font=dict(size=10),
