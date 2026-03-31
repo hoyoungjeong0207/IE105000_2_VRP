@@ -1,29 +1,83 @@
-"""scenario.py — Instance data for the IE105000 VRP Pickup & Delivery Game."""
+"""scenario.py — Location pool and scenario generator for VRP game."""
+import random
 
-DEPOT = {"id": "depot", "name": "Central Warehouse", "x": 5.0, "y": 5.0}
+DEPOT = {"id": "depot", "name": "Warehouse", "x": 5.0, "y": 5.0}
 
-LOCATIONS = {
-    "p1": {"id": "p1", "name": "Bakery",             "type": "pickup",   "x": 1.0, "y": 8.0, "shipment": "s1", "icon": "🥖"},
-    "d1": {"id": "d1", "name": "Office Tower",        "type": "delivery", "x": 9.0, "y": 9.0, "shipment": "s1", "icon": "🏢"},
-    "p2": {"id": "p2", "name": "Electronics Store",   "type": "pickup",   "x": 8.0, "y": 2.0, "shipment": "s2", "icon": "📱"},
-    "d2": {"id": "d2", "name": "University Lab",      "type": "delivery", "x": 2.0, "y": 1.0, "shipment": "s2", "icon": "🔬"},
-    "p3": {"id": "p3", "name": "Flower Market",       "type": "pickup",   "x": 1.0, "y": 3.0, "shipment": "s3", "icon": "💐"},
-    "d3": {"id": "d3", "name": "Hospital",            "type": "delivery", "x": 8.0, "y": 6.0, "shipment": "s3", "icon": "🏥"},
-    "p4": {"id": "p4", "name": "Print Shop",          "type": "pickup",   "x": 9.0, "y": 7.0, "shipment": "s4", "icon": "🖨️"},
-    "d4": {"id": "d4", "name": "School",              "type": "delivery", "x": 3.0, "y": 2.0, "shipment": "s4", "icon": "🏫"},
-    "p5": {"id": "p5", "name": "Café Supply",         "type": "pickup",   "x": 4.0, "y": 9.0, "shipment": "s5", "icon": "☕"},
-    "d5": {"id": "d5", "name": "Restaurant",          "type": "delivery", "x": 7.0, "y": 4.0, "shipment": "s5", "icon": "🍽️"},
-}
+# Pool of 16 named locations with fixed coordinates
+LOCATION_POOL = [
+    {"id": "A",  "name": "Bakery",           "icon": "🥖", "x": 1.0, "y": 8.0},
+    {"id": "B",  "name": "Electronics",      "icon": "📱", "x": 8.0, "y": 2.0},
+    {"id": "C",  "name": "Flower Market",    "icon": "💐", "x": 1.0, "y": 3.0},
+    {"id": "D",  "name": "Print Shop",       "icon": "🖨️", "x": 9.0, "y": 7.0},
+    {"id": "E",  "name": "Café Supply",      "icon": "☕", "x": 4.0, "y": 9.0},
+    {"id": "F",  "name": "Office Tower",     "icon": "🏢", "x": 9.0, "y": 9.0},
+    {"id": "G",  "name": "University Lab",   "icon": "🔬", "x": 2.0, "y": 1.0},
+    {"id": "H",  "name": "Hospital",         "icon": "🏥", "x": 8.0, "y": 6.0},
+    {"id": "I",  "name": "School",           "icon": "🏫", "x": 3.0, "y": 2.0},
+    {"id": "J",  "name": "Restaurant",       "icon": "🍽️", "x": 7.0, "y": 4.0},
+    {"id": "K",  "name": "Supermarket",      "icon": "🛒", "x": 2.0, "y": 6.0},
+    {"id": "L",  "name": "Pharmacy",         "icon": "💊", "x": 6.0, "y": 8.0},
+    {"id": "M",  "name": "Library",          "icon": "📚", "x": 4.0, "y": 2.0},
+    {"id": "N",  "name": "Museum",           "icon": "🏛️", "x": 7.0, "y": 9.0},
+    {"id": "O",  "name": "Post Office",      "icon": "📮", "x": 3.0, "y": 7.0},
+    {"id": "P",  "name": "Sports Center",    "icon": "🏟️", "x": 8.0, "y": 4.0},
+]
 
-SHIPMENTS = {
-    "s1": {"id": "s1", "name": "Fresh Bread",    "pickup": "p1", "delivery": "d1", "demand": 1},
-    "s2": {"id": "s2", "name": "Lab Equipment",  "pickup": "p2", "delivery": "d2", "demand": 1},
-    "s3": {"id": "s3", "name": "Flowers",        "pickup": "p3", "delivery": "d3", "demand": 1},
-    "s4": {"id": "s4", "name": "Documents",      "pickup": "p4", "delivery": "d4", "demand": 1},
-    "s5": {"id": "s5", "name": "Café Supplies",  "pickup": "p5", "delivery": "d5", "demand": 1},
-}
+# Colors for numbered pairs (up to 6 pairs)
+PAIR_COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#a855f7", "#f97316", "#06b6d4"]
 
-VEHICLES = {
-    "v1": {"id": "v1", "name": "Vehicle 1", "capacity": 3, "color": "#3b82f6"},
-    "v2": {"id": "v2", "name": "Vehicle 2", "capacity": 3, "color": "#f59e0b"},
-}
+# Vehicle colors (up to 3 vehicles)
+VEHICLE_COLORS = ["#facc15", "#f472b6", "#34d399"]  # yellow, pink, mint
+
+DEFAULT_NUM_VEHICLES  = 2
+DEFAULT_NUM_SHIPMENTS = 4
+
+
+def generate_scenario(num_vehicles: int, num_shipments: int, seed: int):
+    """
+    Randomly pick 2*num_shipments locations from LOCATION_POOL (no repeats).
+    First num_shipments become pickups, next num_shipments become deliveries.
+    Pair pickup i with delivery i → shipment i+1.
+
+    Returns (locations, shipments, vehicles) as dicts.
+    """
+    import math
+    rng = random.Random(seed)
+    chosen = rng.sample(LOCATION_POOL, num_shipments * 2)
+    pickups    = chosen[:num_shipments]
+    deliveries = chosen[num_shipments:]
+
+    # Capacity: each vehicle can handle ceil(num_shipments / num_vehicles) + 1
+    cap = math.ceil(num_shipments / num_vehicles) + 1
+
+    locations = {}
+    shipments = {}
+    for i, (p, d) in enumerate(zip(pickups, deliveries), start=1):
+        pid = f"p{i}"
+        did = f"d{i}"
+        sid = f"s{i}"
+        locations[pid] = {
+            "id": pid, "name": p["name"], "icon": p["icon"],
+            "type": "pickup", "x": p["x"], "y": p["y"],
+            "shipment": sid, "pair_num": i,
+        }
+        locations[did] = {
+            "id": did, "name": d["name"], "icon": d["icon"],
+            "type": "delivery", "x": d["x"], "y": d["y"],
+            "shipment": sid, "pair_num": i,
+        }
+        shipments[sid] = {
+            "id": sid, "name": f"Shipment {i}",
+            "pickup": pid, "delivery": did, "demand": 1,
+            "pair_num": i,
+        }
+
+    vehicles = {}
+    veh_ids = [f"v{i}" for i in range(1, num_vehicles + 1)]
+    for i, vid in enumerate(veh_ids):
+        vehicles[vid] = {
+            "id": vid, "name": f"Vehicle {i+1}",
+            "capacity": cap, "color": VEHICLE_COLORS[i],
+        }
+
+    return locations, shipments, vehicles

@@ -1,6 +1,6 @@
 """app.py — Streamlit UI for the IE105000 VRP Pickup & Delivery Game."""
-
 import math
+import random
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -12,122 +12,99 @@ try:
 except Exception:
     _DB_AVAILABLE = False
 
-from engine import check_route, evaluate_solution, route_distance
-from scenario import DEPOT, LOCATIONS, SHIPMENTS, VEHICLES
+from engine import check_route, evaluate_solution, route_distance, dist, get_loc
+from scenario import (
+    DEPOT, LOCATION_POOL, PAIR_COLORS, VEHICLE_COLORS,
+    DEFAULT_NUM_VEHICLES, DEFAULT_NUM_SHIPMENTS, generate_scenario,
+)
 from solver import solve
 
-# ── Page config ───────────────────────────────────────────────────────────────
+# ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="VRP Pickup & Delivery Game — IE105000",
+    page_title="VRP Pickup & Delivery — IE105000",
     page_icon="🚚",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
-# ── Color palette ─────────────────────────────────────────────────────────────
+# ── Color palette ──────────────────────────────────────────────────────────────
 _C = {
-    "bg":          "#0f172a",
-    "grid":        "#1e293b",
-    "depot":       "#93c5fd",
-    "pickup":      "#fb923c",   # orange
-    "delivery":    "#4ade80",   # green
-    "v1":          "#60a5fa",   # blue
-    "v2":          "#fbbf24",   # amber
-    "unassigned":  "#94a3b8",
-    "text":        "#f1f5f9",
-    "subtext":     "#94a3b8",
-    "border":      "#334155",
-    "warn":        "#f87171",
-    "ok":          "#4ade80",
-    "card_bg":     "#1e293b",
+    "bg":      "#0f172a",
+    "surface": "#1e293b",
+    "border":  "#334155",
+    "text":    "#f1f5f9",
+    "muted":   "#94a3b8",
+    "depot":   "#93c5fd",
+    "grid":    "#1e293b",
+    "warn":    "#f87171",
+    "ok":      "#4ade80",
+    "info":    "#60a5fa",
 }
 
-# ── CSS ───────────────────────────────────────────────────────────────────────
-st.markdown(
-    """
-    <style>
-    .vrp-card {
-        background: #1e293b;
-        border: 1px solid #334155;
-        border-radius: 8px;
-        padding: 1rem 1.2rem;
-        margin-bottom: 0.75rem;
-    }
-    .vrp-card h4 { margin: 0 0 0.4rem 0; font-size: 1rem; color: #f1f5f9; }
-    .vrp-card p  { margin: 0; font-size: 0.85rem; color: #94a3b8; }
-    .route-v1 { border-left: 4px solid #60a5fa; }
-    .route-v2 { border-left: 4px solid #fbbf24; }
-    .warn-box {
-        background: #1f0f0f;
-        border: 1px solid #f87171;
-        border-radius: 6px;
-        padding: 0.5rem 0.75rem;
-        margin: 0.3rem 0;
-        font-size: 0.85rem;
-        color: #fca5a5;
-    }
-    .ok-box {
-        background: #0f1f0f;
-        border: 1px solid #4ade80;
-        border-radius: 6px;
-        padding: 0.5rem 0.75rem;
-        margin: 0.3rem 0;
-        font-size: 0.85rem;
-        color: #86efac;
-    }
-    .info-box {
-        background: #0f172a;
-        border: 1px solid #60a5fa;
-        border-radius: 6px;
-        padding: 0.5rem 0.75rem;
-        margin: 0.3rem 0;
-        font-size: 0.85rem;
-        color: #93c5fd;
-    }
-    .score-big {
-        font-size: 3rem;
-        font-weight: 700;
-        text-align: center;
-        color: #f1f5f9;
-    }
-    .rank-medal { font-size: 1.4rem; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-# ── Cached solver ─────────────────────────────────────────────────────────────
-@st.cache_data
-def get_reference():
-    return solve()
+# ── CSS ────────────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+.vrp-card {
+    background: #1e293b; border: 1px solid #334155;
+    border-radius: 8px; padding: 0.9rem 1.1rem; margin-bottom: 0.6rem;
+}
+.vrp-card h4 { margin: 0 0 0.3rem 0; font-size: 0.95rem; color: #f1f5f9; }
+.vrp-card p  { margin: 0; font-size: 0.82rem; color: #94a3b8; }
+.warn-box { background:#1f0f0f; border:1px solid #f87171; border-radius:6px;
+    padding:0.4rem 0.7rem; margin:0.25rem 0; font-size:0.82rem; color:#fca5a5; }
+.ok-box   { background:#0f1f0f; border:1px solid #4ade80; border-radius:6px;
+    padding:0.4rem 0.7rem; margin:0.25rem 0; font-size:0.82rem; color:#86efac; }
+.info-box { background:#0f172a; border:1px solid #60a5fa; border-radius:6px;
+    padding:0.4rem 0.7rem; margin:0.25rem 0; font-size:0.82rem; color:#93c5fd; }
+.score-big { font-size:3rem; font-weight:700; text-align:center; color:#f1f5f9; }
+.start-card { background:#1e293b; border:2px solid #334155; border-radius:12px;
+    padding:2rem; max-width:480px; margin:0 auto; }
+</style>
+""", unsafe_allow_html=True)
 
 
-# ── Session state init ────────────────────────────────────────────────────────
+# ── Session state init ─────────────────────────────────────────────────────────
 def _init_state():
-    if "vrp_routes" not in st.session_state:
-        st.session_state.vrp_routes = {"v1": [], "v2": []}
-    if "vrp_active_vehicle" not in st.session_state:
-        st.session_state.vrp_active_vehicle = "v1"
-    if "vrp_submitted" not in st.session_state:
-        st.session_state.vrp_submitted = False
-    if "vrp_evaluation" not in st.session_state:
-        st.session_state.vrp_evaluation = None
-    if "vrp_student_name" not in st.session_state:
-        st.session_state.vrp_student_name = ""
-    if "vrp_reference" not in st.session_state:
-        st.session_state.vrp_reference = None
-    if "vrp_active_tab" not in st.session_state:
-        st.session_state.vrp_active_tab = 0
-    if "vrp_score" not in st.session_state:
-        st.session_state.vrp_score = 0
-
+    defaults = {
+        "vrp_game_started":   False,
+        "vrp_num_vehicles":   DEFAULT_NUM_VEHICLES,
+        "vrp_num_shipments":  DEFAULT_NUM_SHIPMENTS,
+        "vrp_seed":           None,
+        "vrp_locations":      {},
+        "vrp_shipments":      {},
+        "vrp_vehicles":       {},
+        "vrp_routes":         {},
+        "vrp_active_vehicle": "v1",
+        "vrp_submitted":      False,
+        "vrp_evaluation":     None,
+        "vrp_optimal":        None,
+        "vrp_score":          0,
+        "vrp_student_name":   "",
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
 
 _init_state()
 
 
-# ── Helper: which stops are assigned ─────────────────────────────────────────
+# ── Scenario helpers ───────────────────────────────────────────────────────────
+def _sc():
+    """Return (locations, shipments, vehicles) from session state."""
+    return (
+        st.session_state.vrp_locations,
+        st.session_state.vrp_shipments,
+        st.session_state.vrp_vehicles,
+    )
+
+
+@st.cache_data
+def _cached_solve(seed, num_vehicles, num_shipments):
+    locs, ships, vehs = generate_scenario(num_vehicles, num_shipments, seed)
+    return solve(locs, ships, vehs)
+
+
 def _assigned_to():
-    """Returns dict: loc_id -> vehicle_id."""
     result = {}
     for vid, stops in st.session_state.vrp_routes.items():
         for s in stops:
@@ -136,41 +113,23 @@ def _assigned_to():
 
 
 def _all_assigned():
-    """True if every location is assigned to exactly one vehicle."""
+    locations = st.session_state.vrp_locations
     assigned = _assigned_to()
-    return all(loc_id in assigned for loc_id in LOCATIONS)
+    return all(loc_id in assigned for loc_id in locations)
 
 
-def _current_load(vehicle_id):
-    """Return current load carried at end of route (after all stops)."""
-    stops = st.session_state.vrp_routes[vehicle_id]
-    load = 0
-    for sid in stops:
-        loc = LOCATIONS[sid]
-        shipment_id = loc["shipment"]
-        if loc["type"] == "pickup":
-            load += SHIPMENTS[shipment_id]["demand"]
-        else:
-            load -= SHIPMENTS[shipment_id]["demand"]
-    return max(0, load)
-
-
-def _compute_score(evaluation, reference_dist):
-    if not evaluation["feasible"] or evaluation["total_distance"] == 0:
+def _compute_score(student_dist, optimal_dist):
+    if student_dist == 0 or optimal_dist == 0:
         return 0
-    return min(1000, round(1000 * reference_dist / evaluation["total_distance"]))
+    return min(1000, round(1000 * optimal_dist / student_dist))
 
 
-# ── Map drawing ───────────────────────────────────────────────────────────────
-def draw_map(routes, active_vehicle, highlight_clickable=True):
-    """
-    Returns a Plotly figure for the VRP map.
+def pair_color(pair_num):
+    return PAIR_COLORS[(pair_num - 1) % len(PAIR_COLORS)]
 
-    Args:
-        routes: {"v1": [stop_ids], "v2": [stop_ids]}
-        active_vehicle: "v1" or "v2"
-        highlight_clickable: whether to show clickable border for unassigned nodes
-    """
+
+# ── Map drawing ────────────────────────────────────────────────────────────────
+def draw_map(routes, active_vehicle, locations, shipments, vehicles, highlight_clickable=True):
     fig = go.Figure()
 
     assigned = {}
@@ -178,904 +137,683 @@ def draw_map(routes, active_vehicle, highlight_clickable=True):
         for s in stops:
             assigned[s] = vid
 
-    # ── 1. Dashed lines: shipment pairs (pickup ↔ delivery) ───────────────────
-    for sid, sh in SHIPMENTS.items():
-        p = LOCATIONS[sh["pickup"]]
-        d = LOCATIONS[sh["delivery"]]
+    # 1. Dashed lines: shipment pairs
+    for sid, sh in shipments.items():
+        p = locations[sh["pickup"]]
+        d = locations[sh["delivery"]]
+        color = pair_color(sh["pair_num"])
         fig.add_trace(go.Scatter(
-            x=[p["x"], d["x"]],
-            y=[p["y"], d["y"]],
+            x=[p["x"], d["x"]], y=[p["y"], d["y"]],
             mode="lines",
-            line=dict(color="#cbd5e1", width=1, dash="dot"),
-            hoverinfo="skip",
-            showlegend=False,
+            line=dict(color=color, width=1, dash="dot"),
+            hoverinfo="skip", showlegend=False,
         ))
 
-    # ── 2. Route lines for each vehicle ──────────────────────────────────────
+    # 2. Route lines per vehicle
     for vid, stop_ids in routes.items():
         if not stop_ids:
             continue
-        veh = VEHICLES[vid]
+        veh = vehicles[vid]
         full_route = ["depot"] + list(stop_ids) + ["depot"]
-        xs = []
-        ys = []
+        xs, ys = [], []
         for loc_id in full_route:
-            loc = DEPOT if loc_id == "depot" else LOCATIONS[loc_id]
+            loc = DEPOT if loc_id == "depot" else locations[loc_id]
             xs.append(loc["x"])
             ys.append(loc["y"])
-
-        # Draw route line
-        dist_val = route_distance(stop_ids)
+        d_val = route_distance(stop_ids, locations)
         fig.add_trace(go.Scatter(
-            x=xs,
-            y=ys,
-            mode="lines+markers",
-            line=dict(color=veh["color"], width=2.5),
-            marker=dict(
-                symbol="arrow",
-                size=10,
-                color=veh["color"],
-                angleref="previous",
-            ),
-            name=f"{veh['name']} ({dist_val:.2f} km)",
-            showlegend=True,
-            hoverinfo="skip",
+            x=xs, y=ys, mode="lines+markers",
+            line=dict(color=veh["color"], width=3),
+            marker=dict(symbol="arrow", size=10, color=veh["color"], angleref="previous"),
+            name=f"{veh['name']} ({d_val:.2f} km)",
+            showlegend=True, hoverinfo="skip",
         ))
 
-    # ── 3. Location nodes ─────────────────────────────────────────────────────
-    # Group nodes by render category for the scatter
-    groups = {
-        "v1":         {"xs": [], "ys": [], "texts": [], "hovers": [], "ids": [], "color": _C["v1"],    "symbol": "circle", "size": 16, "label": "V1 assigned"},
-        "v2":         {"xs": [], "ys": [], "texts": [], "hovers": [], "ids": [], "color": _C["v2"],    "symbol": "circle", "size": 16, "label": "V2 assigned"},
-        "pickup":     {"xs": [], "ys": [], "texts": [], "hovers": [], "ids": [], "color": _C["pickup"], "symbol": "circle", "size": 14, "label": "Pickup (unassigned)"},
-        "delivery":   {"xs": [], "ys": [], "texts": [], "hovers": [], "ids": [], "color": _C["delivery"], "symbol": "diamond", "size": 14, "label": "Delivery (unassigned)"},
-    }
+    # 3. Location nodes — one trace per location for click detection
+    for loc_id, loc in locations.items():
+        sh = shipments[loc["shipment"]]
+        pnum = loc["pair_num"]
+        color = pair_color(pnum)
+        symbol = "circle" if loc["type"] == "pickup" else "diamond"
+        label = f"{pnum}{'P' if loc['type'] == 'pickup' else 'D'}"
 
-    for loc_id, loc in LOCATIONS.items():
-        sh = SHIPMENTS[loc["shipment"]]
-        hover = (
-            f"<b>{loc['icon']} {loc['name']}</b><br>"
-            f"Type: {loc['type'].capitalize()}<br>"
-            f"Shipment: {sh['name']} ({loc['shipment']})<br>"
-            f"Coords: ({loc['x']}, {loc['y']})"
-        )
         if loc_id in assigned:
             vid = assigned[loc_id]
-            g = groups[vid]
+            border_color = vehicles[vid]["color"]
+            border_width = 3
+        elif highlight_clickable:
+            border_color = color
+            border_width = 2
         else:
-            g = groups[loc["type"]]
-        g["xs"].append(loc["x"])
-        g["ys"].append(loc["y"])
-        g["texts"].append(loc_id)
-        g["hovers"].append(hover)
-        g["ids"].append(loc_id)
+            border_color = "#0f172a"
+            border_width = 1
 
-    for gname, g in groups.items():
-        if not g["xs"]:
-            continue
-        # Border color for clickable unassigned nodes
-        if highlight_clickable and gname in ("pickup", "delivery"):
-            line_color = _C["pickup"] if gname == "pickup" else _C["delivery"]
-            line_width = 2
-        else:
-            line_color = "#0f172a"
-            line_width = 1.5
+        hover = (
+            f"<b>{label}: {loc['icon']} {loc['name']}</b><br>"
+            f"{'Pickup' if loc['type'] == 'pickup' else 'Delivery'} for Shipment {pnum}<br>"
+            f"Coords: ({loc['x']}, {loc['y']})"
+            + (f"<br>→ Assigned to {vehicles[assigned[loc_id]]['name']}" if loc_id in assigned else "")
+        )
 
         fig.add_trace(go.Scatter(
-            x=g["xs"],
-            y=g["ys"],
-            mode="markers",
+            x=[loc["x"]], y=[loc["y"]],
+            mode="markers+text",
             marker=dict(
-                symbol=g["symbol"],
-                size=g["size"],
-                color=g["color"],
-                opacity=0.9,
-                line=dict(color=line_color, width=line_width),
+                symbol=symbol, size=20,
+                color=color, opacity=0.95,
+                line=dict(color=border_color, width=border_width),
             ),
-            customdata=[[cid] for cid in g["ids"]],
-            hovertext=g["hovers"],
-            hoverinfo="text",
-            name=g["label"],
-            showlegend=True,
+            text=[label],
+            textposition="middle center",
+            textfont=dict(size=10, color="white", family="monospace"),
+            customdata=[[loc_id]],
+            hovertext=[hover], hoverinfo="text",
+            showlegend=False,
         ))
 
-    # ── 4. Depot node ─────────────────────────────────────────────────────────
+    # 4. Depot
     fig.add_trace(go.Scatter(
-        x=[DEPOT["x"]],
-        y=[DEPOT["y"]],
-        mode="markers",
-        marker=dict(
-            symbol="square",
-            size=20,
-            color=_C["depot"],
-            line=dict(color="#0f172a", width=2),
-        ),
+        x=[DEPOT["x"]], y=[DEPOT["y"]],
+        mode="markers+text",
+        marker=dict(symbol="square", size=22, color="#1e3a5f", line=dict(color=_C["depot"], width=2)),
+        text=["🏭"],
+        textposition="middle center",
         customdata=[["depot"]],
-        hovertext=[f"<b>🏭 {DEPOT['name']}</b><br>Depot (start/end)<br>Coords: ({DEPOT['x']}, {DEPOT['y']})"],
+        hovertext=[f"<b>🏭 {DEPOT['name']}</b><br>Start/end for all vehicles"],
         hoverinfo="text",
-        name="Depot",
-        showlegend=True,
+        name="Depot", showlegend=True,
     ))
 
-    # ── 5. Node annotations (labels outside markers) ─────────────────────────
-    annotations = []
-
-    # Depot label
-    annotations.append(dict(
-        x=DEPOT["x"], y=DEPOT["y"] - 0.55,
+    # 5. Annotations: location name labels
+    annotations = [dict(
+        x=DEPOT["x"], y=DEPOT["y"] - 0.6,
         text=f"<b>{DEPOT['name']}</b>",
         showarrow=False,
         font=dict(size=10, color=_C["depot"]),
-        bgcolor="rgba(15,23,42,0.85)",
-        borderpad=2,
-    ))
-
-    # Location labels
-    for loc_id, loc in LOCATIONS.items():
-        # Smart label placement: avoid overlap with depot
-        dx = 0
-        dy = 0.55
-        # Push label away from depot
-        if loc["y"] < DEPOT["y"]:
-            dy = -0.55
-        if loc["x"] < 1.5:
-            dx = 0.3
-        elif loc["x"] > 8.5:
-            dx = -0.3
-
-        if loc_id in assigned:
-            vid = assigned[loc_id]
-            fc = _C[vid]
-        elif loc["type"] == "pickup":
-            fc = _C["pickup"]
-        else:
-            fc = _C["delivery"]
-
-        tag = "P" if loc["type"] == "pickup" else "D"
-        label_text = f"<b>[{tag}] {loc['name']}</b>"
-
+        bgcolor="rgba(15,23,42,0.85)", borderpad=2,
+    )]
+    for loc_id, loc in locations.items():
+        dy = 0.65 if loc["y"] < 5 else -0.65
+        dx = 0.3 if loc["x"] < 1.5 else (-0.3 if loc["x"] > 8.5 else 0)
+        pnum = loc["pair_num"]
+        color = pair_color(pnum)
         annotations.append(dict(
-            x=loc["x"] + dx,
-            y=loc["y"] + dy,
-            text=label_text,
+            x=loc["x"] + dx, y=loc["y"] + dy,
+            text=f"<b>{loc['icon']} {loc['name']}</b>",
             showarrow=False,
-            font=dict(size=9, color=fc),
-            bgcolor="rgba(15,23,42,0.85)",
-            borderpad=2,
+            font=dict(size=9, color=color),
+            bgcolor="rgba(15,23,42,0.85)", borderpad=2,
         ))
 
     fig.update_layout(
         annotations=annotations,
         plot_bgcolor=_C["bg"],
         paper_bgcolor=_C["bg"],
-        xaxis=dict(
-            range=[-0.2, 10.5],
-            gridcolor=_C["grid"],
-            gridwidth=1,
-            dtick=1,
-            title="x (km)",
-            showline=True,
-            linecolor=_C["border"],
-            zeroline=False,
-        ),
-        yaxis=dict(
-            range=[-0.2, 10.5],
-            gridcolor=_C["grid"],
-            gridwidth=1,
-            dtick=1,
-            title="y (km)",
-            showline=True,
-            linecolor=_C["border"],
-            zeroline=False,
-            scaleanchor="x",
-            scaleratio=1,
-        ),
-        legend=dict(
-            orientation="v",
-            x=1.01, y=1,
-            bgcolor="rgba(15,23,42,0.9)",
-            bordercolor=_C["border"],
-            borderwidth=1,
-            font=dict(size=10),
-        ),
-        margin=dict(l=40, r=160, t=40, b=40),
-        height=550,
+        xaxis=dict(range=[-0.3, 10.7], gridcolor=_C["grid"], gridwidth=1, dtick=1,
+                   title="x (km)", titlefont=dict(color=_C["muted"]),
+                   tickfont=dict(color=_C["muted"]), showline=True,
+                   linecolor=_C["border"], zeroline=False),
+        yaxis=dict(range=[-0.3, 10.7], gridcolor=_C["grid"], gridwidth=1, dtick=1,
+                   title="y (km)", titlefont=dict(color=_C["muted"]),
+                   tickfont=dict(color=_C["muted"]), showline=True,
+                   linecolor=_C["border"], zeroline=False,
+                   scaleanchor="x", scaleratio=1),
+        legend=dict(orientation="v", x=1.01, y=1,
+                    bgcolor="rgba(15,23,42,0.9)", bordercolor=_C["border"],
+                    borderwidth=1, font=dict(size=10, color=_C["text"])),
+        margin=dict(l=40, r=160, t=20, b=40),
+        height=540,
         clickmode="event+select",
         dragmode=False,
         hovermode="closest",
+        font=dict(color=_C["text"]),
     )
-
     return fig
 
 
-# ── Route panel helper ────────────────────────────────────────────────────────
+# ── Route panel ────────────────────────────────────────────────────────────────
 def _render_route_panel(vehicle_id):
-    """Renders the route details panel for one vehicle."""
-    veh = VEHICLES[vehicle_id]
-    stops = st.session_state.vrp_routes[vehicle_id]
+    locations, shipments, vehicles = _sc()
+    veh = vehicles[vehicle_id]
+    stops = st.session_state.vrp_routes.get(vehicle_id, [])
     color = veh["color"]
     cap = veh["capacity"]
 
-    # Compute load profile
     load = 0
-    load_ok = True
-    picked_shipments = set()
+    picked = set()
     violations_local = []
     for sid in stops:
-        loc = LOCATIONS[sid]
+        loc = locations[sid]
         sh_id = loc["shipment"]
         if loc["type"] == "pickup":
-            load += SHIPMENTS[sh_id]["demand"]
-            picked_shipments.add(sh_id)
+            load += 1
+            picked.add(sh_id)
             if load > cap:
-                load_ok = False
                 violations_local.append(f"Over capacity at {loc['name']}")
         else:
-            if sh_id not in picked_shipments:
+            if sh_id not in picked:
                 violations_local.append(f"Delivery before pickup: {loc['name']}")
             else:
-                load -= SHIPMENTS[sh_id]["demand"]
+                load -= 1
 
-    dist_val = route_distance(stops) if stops else 0.0
+    d_val = route_distance(stops, locations) if stops else 0.0
 
-    border_cls = f"route-{vehicle_id}"
     st.markdown(
-        f'<div class="vrp-card {border_cls}">'
+        f'<div class="vrp-card" style="border-left:4px solid {color}">'
         f'<h4 style="color:{color}">🚚 {veh["name"]}</h4>'
-        f'<p>Capacity: {len([s for s in stops if LOCATIONS[s]["type"]=="pickup"])}/{cap} shipments &nbsp;|&nbsp; '
-        f'Distance: {dist_val:.2f} km</p>'
-        f'</div>',
-        unsafe_allow_html=True,
+        f'<p>Shipments: {len([s for s in stops if locations[s]["type"] == "pickup"])}/{cap} &nbsp;|&nbsp; '
+        f'Distance: {d_val:.2f} km</p>'
+        f'</div>', unsafe_allow_html=True,
     )
 
     if not stops:
-        st.markdown('<p style="color:#94a3b8;font-size:0.85rem;">No stops assigned yet.</p>', unsafe_allow_html=True)
+        st.markdown('<p style="color:#94a3b8;font-size:0.82rem;margin:0">No stops yet.</p>', unsafe_allow_html=True)
     else:
-        route_str = " → ".join(
-            [f"**{LOCATIONS[s]['icon']} {LOCATIONS[s]['name']}** ({'P' if LOCATIONS[s]['type']=='pickup' else 'D'})"
-             for s in stops]
-        )
-        st.markdown(f"Depot → {route_str} → Depot")
-
-    for v in violations_local:
-        st.markdown(f'<div class="warn-box">⚠ {v}</div>', unsafe_allow_html=True)
-
-    if stops and not violations_local:
-        st.markdown('<div class="ok-box">✓ Route valid so far</div>', unsafe_allow_html=True)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — Scenario
-# ═══════════════════════════════════════════════════════════════════════════════
-def tab_scenario():
-    st.header("Urban Package Delivery — Pickup & Delivery VRP")
-    st.markdown(
-        "You manage a fleet of delivery vehicles for an urban logistics company. "
-        "**5 shipments** must be picked up from their origin and delivered to their destination. "
-        "Use **2 vehicles** efficiently — minimise total travel distance while respecting "
-        "**capacity** and **precedence** (pickup before delivery) constraints."
-    )
-
-    col1, col2 = st.columns([3, 2])
-
-    with col1:
-        # Map overview
-        empty_routes = {"v1": [], "v2": []}
-        fig = draw_map(empty_routes, "v1", highlight_clickable=False)
-        fig.update_layout(title="Network Map — All Locations", height=480)
-        st.plotly_chart(fig, use_container_width=True, key="scenario_map")
-
-    with col2:
-        # Depot info
-        st.subheader("Depot")
+        parts = []
+        for s in stops:
+            loc = locations[s]
+            pnum = loc["pair_num"]
+            tag = "P" if loc["type"] == "pickup" else "D"
+            c = pair_color(pnum)
+            parts.append(f'<span style="color:{c};font-weight:bold">{pnum}{tag}</span>')
         st.markdown(
-            f'<div class="vrp-card">'
-            f'<h4>🏭 {DEPOT["name"]}</h4>'
-            f'<p>Starting & ending point for both vehicles<br>'
-            f'Coordinates: ({DEPOT["x"]}, {DEPOT["y"]})</p>'
-            f'</div>',
+            f'<p style="font-size:0.85rem;color:#f1f5f9">Depot → {" → ".join(parts)} → Depot</p>',
             unsafe_allow_html=True,
         )
 
-        # Vehicle specs
+    for v in violations_local:
+        st.markdown(f'<div class="warn-box">⚠ {v}</div>', unsafe_allow_html=True)
+    if stops and not violations_local:
+        st.markdown('<div class="ok-box">✓ Valid so far</div>', unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# START SCREEN
+# ══════════════════════════════════════════════════════════════════════════════
+def show_start_screen():
+    st.title("🚚 Pickup & Delivery VRP Game")
+    st.markdown(
+        "Plan routes for delivery vehicles to pick up and deliver shipments "
+        "across a 10×10 km city. Minimise total travel distance!"
+    )
+    st.markdown("---")
+
+    col_left, col_mid, col_right = st.columns([1, 2, 1])
+    with col_mid:
+        st.markdown('<div class="start-card">', unsafe_allow_html=True)
+        st.subheader("Game Settings")
+        st.markdown("")
+
+        num_vehicles = st.slider(
+            "Number of Vehicles", min_value=1, max_value=3,
+            value=st.session_state.vrp_num_vehicles,
+            help="How many vehicles are available for delivery",
+        )
+        num_shipments = st.slider(
+            "Number of Shipments (OD pairs)", min_value=2, max_value=6,
+            value=st.session_state.vrp_num_shipments,
+            help="Each shipment has one pickup location and one delivery location",
+        )
+
+        cap = math.ceil(num_shipments / num_vehicles) + 1
+        st.markdown(
+            f'<div class="info-box">Each vehicle capacity: <b>{cap} shipments</b></div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("")
+
+        name_input = st.text_input(
+            "Your Name (for leaderboard)",
+            value=st.session_state.vrp_student_name,
+            placeholder="Enter your name...",
+        )
+
+        st.markdown("")
+        if st.button("🚀 Start Game", type="primary", use_container_width=True):
+            seed = random.randint(0, 99999)
+            locations, shipments, vehicles = generate_scenario(num_vehicles, num_shipments, seed)
+            st.session_state.vrp_num_vehicles  = num_vehicles
+            st.session_state.vrp_num_shipments = num_shipments
+            st.session_state.vrp_seed          = seed
+            st.session_state.vrp_locations     = locations
+            st.session_state.vrp_shipments     = shipments
+            st.session_state.vrp_vehicles      = vehicles
+            st.session_state.vrp_routes        = {vid: [] for vid in vehicles}
+            st.session_state.vrp_active_vehicle = list(vehicles.keys())[0]
+            st.session_state.vrp_submitted      = False
+            st.session_state.vrp_evaluation     = None
+            st.session_state.vrp_optimal        = None
+            st.session_state.vrp_score          = 0
+            st.session_state.vrp_student_name   = name_input.strip()
+            st.session_state.vrp_game_started   = True
+            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # Show location pool table
+    st.markdown("---")
+    st.subheader("Location Pool")
+    st.markdown("Shipment origins and destinations will be randomly chosen from these locations:")
+    pool_data = [{"Location": l["icon"] + " " + l["name"], "X": l["x"], "Y": l["y"]} for l in LOCATION_POOL]
+    col_a, col_b = st.columns(2)
+    mid = len(pool_data) // 2
+    with col_a:
+        st.dataframe(pd.DataFrame(pool_data[:mid]), use_container_width=True, hide_index=True)
+    with col_b:
+        st.dataframe(pd.DataFrame(pool_data[mid:]), use_container_width=True, hide_index=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GAME TABS
+# ══════════════════════════════════════════════════════════════════════════════
+def tab_scenario():
+    locations, shipments, vehicles = _sc()
+
+    st.header("Scenario")
+    col1, col2 = st.columns([3, 2])
+
+    with col1:
+        empty_routes = {vid: [] for vid in vehicles}
+        fig = draw_map(empty_routes, list(vehicles.keys())[0], locations, shipments, vehicles, highlight_clickable=False)
+        fig.update_layout(title="All Pickup & Delivery Locations", height=460)
+        st.plotly_chart(fig, use_container_width=True, key="scenario_map", config={"displayModeBar": False})
+
+    with col2:
+        st.subheader("Depot")
+        st.markdown(
+            f'<div class="vrp-card"><h4>🏭 {DEPOT["name"]}</h4>'
+            f'<p>All vehicles start and end here<br>Coords: ({DEPOT["x"]}, {DEPOT["y"]})</p></div>',
+            unsafe_allow_html=True,
+        )
         st.subheader("Vehicles")
-        for vid, veh in VEHICLES.items():
+        for vid, veh in vehicles.items():
             st.markdown(
-                f'<div class="vrp-card route-{vid}">'
+                f'<div class="vrp-card" style="border-left:4px solid {veh["color"]}">'
                 f'<h4 style="color:{veh["color"]}">🚚 {veh["name"]}</h4>'
-                f'<p>Capacity: {veh["capacity"]} shipments</p>'
-                f'</div>',
+                f'<p>Capacity: {veh["capacity"]} shipments</p></div>',
                 unsafe_allow_html=True,
             )
 
-    # Shipments table
     st.subheader("Shipments")
     rows = []
-    for sid, sh in SHIPMENTS.items():
-        p = LOCATIONS[sh["pickup"]]
-        d = LOCATIONS[sh["delivery"]]
+    for sid, sh in shipments.items():
+        p = locations[sh["pickup"]]
+        d = locations[sh["delivery"]]
         rows.append({
-            "Shipment": sid.upper(),
-            "Name": sh["name"],
-            "Pickup": f"{p['icon']} {p['name']} ({p['x']}, {p['y']})",
-            "Delivery": f"{d['icon']} {d['name']} ({d['x']}, {d['y']})",
-            "Demand": sh["demand"],
+            "#": sh["pair_num"],
+            "Pickup": f"{p['icon']} {p['name']} ({p['x']},{p['y']})",
+            "Delivery": f"{d['icon']} {d['name']} ({d['x']},{d['y']})",
         })
-    df = pd.DataFrame(rows)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-    # Locations table
-    st.subheader("All Locations")
-    loc_rows = []
-    for loc_id, loc in LOCATIONS.items():
-        loc_rows.append({
-            "ID": loc_id,
-            "Icon": loc["icon"],
-            "Name": loc["name"],
-            "Type": loc["type"].capitalize(),
-            "X (km)": loc["x"],
-            "Y (km)": loc["y"],
-            "Shipment": loc["shipment"].upper(),
-        })
-    loc_df = pd.DataFrame(loc_rows)
-    st.dataframe(loc_df, use_container_width=True, hide_index=True)
+    st.subheader("Rules")
+    cap_example = list(vehicles.values())[0]["capacity"]
+    st.markdown(f"""
+| Constraint | Description |
+|---|---|
+| **Precedence** | For each shipment, pick up **before** delivering |
+| **Capacity** | Each vehicle carries at most **{cap_example} shipments** at once |
+| **Coverage** | Every shipment's pickup AND delivery go to the **same vehicle** |
+| **Routing** | Every route starts and ends at the **Warehouse** |
 
-    # Rules
-    st.subheader("Rules & Constraints")
-    st.markdown(
-        """
-        | Constraint | Description |
-        |---|---|
-        | **Precedence** | You must visit the pickup location **before** the delivery location for each shipment |
-        | **Capacity** | Each vehicle can carry at most **3 shipments** at any time |
-        | **Coverage** | Every shipment must be assigned (pickup AND delivery) to exactly one vehicle |
-        | **Start/End** | Every vehicle route starts and ends at the **Central Warehouse** |
+**Objective:** Minimise **total travel distance** (sum of all vehicle routes).
 
-        **Objective:** Minimise total travel distance (sum of both vehicle routes, including return to depot).
-
-        **Score formula:** `score = min(1000, round(1000 × reference_distance / your_distance))`
-        A perfect score of 1000 means you matched the reference (heuristic) solution.
-        """
-    )
+**Score = min(1000, round(1000 × optimal_distance / your_distance))**
+A score of 1000 means you matched or beat the optimal solution.
+""")
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — Plan Routes
-# ═══════════════════════════════════════════════════════════════════════════════
 def tab_plan():
-    st.header("Plan Your Routes")
+    locations, shipments, vehicles = _sc()
+    vehicle_ids = list(vehicles.keys())
 
-    # ── Student name ─────────────────────────────────────────────────────────
-    name_col, _, reset_col = st.columns([3, 3, 1])
-    with name_col:
-        student_name = st.text_input(
-            "Your name (for leaderboard)",
-            value=st.session_state.vrp_student_name,
-            placeholder="Enter your name...",
-            key="name_input",
-        )
-        st.session_state.vrp_student_name = student_name
-
-    with reset_col:
+    # ── Name input + reset ───────────────────────────────────────────────────
+    nc, _, rc = st.columns([3, 3, 1])
+    with nc:
+        name = st.text_input("Your name", value=st.session_state.vrp_student_name, key="name_input")
+        st.session_state.vrp_student_name = name
+    with rc:
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🔄 Reset All", use_container_width=True):
-            st.session_state.vrp_routes = {"v1": [], "v2": []}
+        if st.button("🔄 Reset", use_container_width=True):
+            st.session_state.vrp_routes    = {vid: [] for vid in vehicles}
             st.session_state.vrp_submitted = False
             st.session_state.vrp_evaluation = None
             st.session_state.vrp_score = 0
             st.rerun()
 
     if st.session_state.vrp_submitted:
-        st.info("✅ You have already submitted a solution. Reset to try again.")
+        st.info("✅ Already submitted. Reset to try again.")
         return
 
-    # ── Active vehicle selector ───────────────────────────────────────────────
-    st.markdown("#### Active Vehicle")
-    av_col1, av_col2, av_col3 = st.columns([2, 2, 6])
-    with av_col1:
-        v1_label = "🔵 Vehicle 1 (Blue)"
-        v1_active = st.session_state.vrp_active_vehicle == "v1"
-        if st.button(
-            v1_label,
-            use_container_width=True,
-            type="primary" if v1_active else "secondary",
-            key="btn_v1",
-        ):
-            st.session_state.vrp_active_vehicle = "v1"
-            st.rerun()
-    with av_col2:
-        v2_label = "🟡 Vehicle 2 (Amber)"
-        v2_active = st.session_state.vrp_active_vehicle == "v2"
-        if st.button(
-            v2_label,
-            use_container_width=True,
-            type="primary" if v2_active else "secondary",
-            key="btn_v2",
-        ):
-            st.session_state.vrp_active_vehicle = "v2"
-            st.rerun()
-    with av_col3:
+    # ── Vehicle selector buttons ─────────────────────────────────────────────
+    st.markdown("#### Select Active Vehicle")
+    veh_cols = st.columns(len(vehicle_ids) + 1)
+    for i, vid in enumerate(vehicle_ids):
+        veh = vehicles[vid]
+        is_active = st.session_state.vrp_active_vehicle == vid
+        with veh_cols[i]:
+            label = f"🚚 {veh['name']}"
+            if st.button(label, key=f"btn_{vid}", use_container_width=True,
+                         type="primary" if is_active else "secondary"):
+                st.session_state.vrp_active_vehicle = vid
+                st.rerun()
+    with veh_cols[-1]:
         av = st.session_state.vrp_active_vehicle
-        av_color = _C["v1"] if av == "v1" else _C["v2"]
-        av_name = VEHICLES[av]["name"]
+        av_color = vehicles[av]["color"]
+        av_name = vehicles[av]["name"]
         st.markdown(
-            f'<div class="info-box">Clicking a node on the map will add it to <b style="color:{av_color}">{av_name}</b>\'s route.</div>',
+            f'<div class="info-box" style="margin-top:0.3rem">Clicking map → adds to '
+            f'<b style="color:{av_color}">{av_name}</b></div>',
             unsafe_allow_html=True,
         )
 
     st.markdown("---")
 
-    # ── Main layout: map left, controls right ────────────────────────────────
+    # ── Map + controls ───────────────────────────────────────────────────────
     map_col, ctrl_col = st.columns([3, 2])
-
-    routes = st.session_state.vrp_routes
+    routes   = st.session_state.vrp_routes
     active_v = st.session_state.vrp_active_vehicle
     assigned = _assigned_to()
 
     with map_col:
-        fig = draw_map(routes, active_v, highlight_clickable=True)
+        fig = draw_map(routes, active_v, locations, shipments, vehicles, highlight_clickable=True)
+
+        # Pair legend below map
+        legend_html = " &nbsp; ".join(
+            f'<span style="color:{pair_color(sh["pair_num"])};font-weight:bold">'
+            f'{sh["pair_num"]}P/{sh["pair_num"]}D = {locations[sh["pickup"]]["icon"]} {locations[sh["pickup"]]["name"]} → '
+            f'{locations[sh["delivery"]]["icon"]} {locations[sh["delivery"]]["name"]}</span>'
+            for sh in shipments.values()
+        )
+
         event = st.plotly_chart(
-            fig,
-            use_container_width=True,
-            key="plan_map",
-            on_select="rerun",
-            selection_mode=("points",),
+            fig, use_container_width=True, key="plan_map",
+            on_select="rerun", selection_mode=("points",),
+            config={"displayModeBar": False},
         )
+        st.markdown(f'<p style="font-size:0.78rem;color:#94a3b8;margin-top:0">{legend_html}</p>', unsafe_allow_html=True)
 
-        # ── Handle click ──────────────────────────────────────────────────────
+        # Handle click
         if event and hasattr(event, "selection") and event.selection:
-            sel = event.selection
-            points = sel.get("points", [])
+            points = event.selection.get("points", [])
             if points:
-                pt = points[0]
-                cd = pt.get("customdata")
-                if cd is not None:
-                    loc_id = cd[0] if isinstance(cd, (list, tuple)) else cd
+                cd = points[0].get("customdata")
+                loc_id = (cd[0] if isinstance(cd, (list, tuple)) else cd) if cd is not None else None
+                if loc_id and loc_id != "depot":
+                    loc = locations.get(loc_id)
+                    if loc:
+                        av = st.session_state.vrp_active_vehicle
+                        cur_route = st.session_state.vrp_routes[av]
+                        other_vs = [v for v in vehicle_ids if v != av]
+                        in_other = any(loc_id in st.session_state.vrp_routes[v] for v in other_vs)
 
-                    if loc_id and loc_id != "depot":
-                        loc = LOCATIONS.get(loc_id)
-                        if loc:
-                            av = st.session_state.vrp_active_vehicle
-                            current_route = st.session_state.vrp_routes[av]
-                            other_v = "v2" if av == "v1" else "v1"
-
-                            # Already in current vehicle route?
-                            if loc_id in current_route:
-                                st.warning(f"'{loc['name']}' is already in {VEHICLES[av]['name']}'s route.")
-                            # Already in other vehicle route?
-                            elif loc_id in st.session_state.vrp_routes[other_v]:
-                                st.warning(
-                                    f"'{loc['name']}' is already assigned to {VEHICLES[other_v]['name']}. "
-                                    "You cannot assign the same stop to two vehicles."
-                                )
+                        if loc_id in cur_route:
+                            st.warning(f"Already in {vehicles[av]['name']}'s route.")
+                        elif in_other:
+                            st.warning("Already assigned to another vehicle.")
+                        elif loc["type"] == "delivery":
+                            pid = shipments[loc["shipment"]]["pickup"]
+                            if pid not in cur_route:
+                                pname = locations[pid]["name"]
+                                st.error(f"Must pick up '{pname}' first.")
                             else:
-                                # Check precedence for delivery
-                                if loc["type"] == "delivery":
-                                    sh_id = loc["shipment"]
-                                    pickup_id = SHIPMENTS[sh_id]["pickup"]
-                                    if pickup_id not in current_route:
-                                        st.error(
-                                            f"Cannot add delivery '{loc['name']}': "
-                                            f"pickup '{LOCATIONS[pickup_id]['name']}' must be added to {VEHICLES[av]['name']} first."
-                                        )
-                                    else:
-                                        st.session_state.vrp_routes[av].append(loc_id)
-                                        st.rerun()
-                                else:
-                                    # Check capacity before adding pickup
-                                    cap = VEHICLES[av]["capacity"]
-                                    current_pickups = sum(
-                                        1 for s in current_route if LOCATIONS[s]["type"] == "pickup"
-                                    )
-                                    if current_pickups >= cap:
-                                        st.error(
-                                            f"{VEHICLES[av]['name']} is already at full capacity "
-                                            f"({cap} pickups). Cannot add more pickups."
-                                        )
-                                    else:
-                                        st.session_state.vrp_routes[av].append(loc_id)
-                                        st.rerun()
+                                st.session_state.vrp_routes[av].append(loc_id)
+                                st.rerun()
+                        else:
+                            pickups_in = sum(1 for s in cur_route if locations[s]["type"] == "pickup")
+                            if pickups_in >= vehicles[av]["capacity"]:
+                                st.error(f"{vehicles[av]['name']} at capacity.")
+                            else:
+                                st.session_state.vrp_routes[av].append(loc_id)
+                                st.rerun()
 
-        st.caption(
-            "Click any node to add it to the active vehicle's route. "
-            "Orange circles = pickups, green diamonds = deliveries, dark square = depot."
-        )
+        st.caption("Click a node to add it to the active vehicle's route. Circles = pickups, diamonds = deliveries.")
 
     with ctrl_col:
         st.markdown("#### Route Details")
 
-        # V1 Panel
-        _render_route_panel("v1")
-        undo_c1, clr_c1 = st.columns(2)
-        with undo_c1:
-            if st.button("↩ Undo Last", key="undo_v1", use_container_width=True):
-                if st.session_state.vrp_routes["v1"]:
-                    st.session_state.vrp_routes["v1"].pop()
+        for vid in vehicle_ids:
+            _render_route_panel(vid)
+            u_col, c_col = st.columns(2)
+            with u_col:
+                if st.button("↩ Undo", key=f"undo_{vid}", use_container_width=True):
+                    if st.session_state.vrp_routes[vid]:
+                        st.session_state.vrp_routes[vid].pop()
+                        st.rerun()
+            with c_col:
+                vnum = vid[1]
+                if st.button(f"🗑 Clear V{vnum}", key=f"clear_{vid}", use_container_width=True):
+                    st.session_state.vrp_routes[vid] = []
                     st.rerun()
-        with clr_c1:
-            if st.button("🗑 Clear V1", key="clear_v1", use_container_width=True):
-                st.session_state.vrp_routes["v1"] = []
-                st.rerun()
-
-        st.markdown("")
-
-        # V2 Panel
-        _render_route_panel("v2")
-        undo_c2, clr_c2 = st.columns(2)
-        with undo_c2:
-            if st.button("↩ Undo Last", key="undo_v2", use_container_width=True):
-                if st.session_state.vrp_routes["v2"]:
-                    st.session_state.vrp_routes["v2"].pop()
-                    st.rerun()
-        with clr_c2:
-            if st.button("🗑 Clear V2", key="clear_v2", use_container_width=True):
-                st.session_state.vrp_routes["v2"] = []
-                st.rerun()
+            st.markdown("")
 
         st.markdown("---")
 
-        # ── Progress & submission ─────────────────────────────────────────────
-        all_loc_ids = list(LOCATIONS.keys())
-        n_assigned = sum(1 for loc_id in all_loc_ids if loc_id in assigned)
+        # Progress
+        all_loc_ids = list(locations.keys())
+        n_assigned = sum(1 for l in all_loc_ids if l in assigned)
         n_total = len(all_loc_ids)
-        progress = n_assigned / n_total if n_total > 0 else 0
+        st.progress(n_assigned / n_total if n_total else 0, text=f"{n_assigned}/{n_total} stops assigned")
 
-        st.markdown("#### Progress")
-        st.progress(progress, text=f"{n_assigned}/{n_total} stops assigned")
-
-        # Shipment status
-        for sid, sh in SHIPMENTS.items():
-            pid = sh["pickup"]
-            did = sh["delivery"]
+        # Shipment checklist
+        for sid, sh in shipments.items():
+            pid, did = sh["pickup"], sh["delivery"]
             p_done = pid in assigned
             d_done = did in assigned
-            if p_done and d_done:
-                pv = assigned[pid]
-                dv = assigned[did]
-                if pv == dv:
-                    vcolor = _C[pv]
-                    st.markdown(
-                        f'<div class="ok-box">✓ {sh["name"]} ({sid.upper()}) — {VEHICLES[pv]["name"]}</div>',
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    st.markdown(
-                        f'<div class="warn-box">⚠ {sh["name"]} ({sid.upper()}) — split across vehicles!</div>',
-                        unsafe_allow_html=True,
-                    )
+            pnum = sh["pair_num"]
+            c = pair_color(pnum)
+            p_veh = assigned.get(pid, "")
+            d_veh = assigned.get(did, "")
+
+            if p_done and d_done and p_veh == d_veh:
+                label = f'✓ <b style="color:{c}">Shipment {pnum}</b> — {vehicles[p_veh]["name"]}'
+                st.markdown(f'<div class="ok-box">{label}</div>', unsafe_allow_html=True)
+            elif p_done and d_done and p_veh != d_veh:
+                st.markdown(f'<div class="warn-box">⚠ Shipment {pnum} split across vehicles!</div>', unsafe_allow_html=True)
             elif p_done:
-                st.markdown(
-                    f'<div class="info-box">→ {sh["name"]} ({sid.upper()}) — pickup done, delivery missing</div>',
-                    unsafe_allow_html=True,
-                )
+                st.markdown(f'<div class="info-box"><b style="color:{c}">Shipment {pnum}</b>: pickup ✓, delivery missing</div>', unsafe_allow_html=True)
             elif d_done:
-                st.markdown(
-                    f'<div class="warn-box">⚠ {sh["name"]} ({sid.upper()}) — delivery done but pickup missing!</div>',
-                    unsafe_allow_html=True,
-                )
+                st.markdown(f'<div class="warn-box">⚠ Shipment {pnum}: delivery added but pickup missing!</div>', unsafe_allow_html=True)
             else:
-                st.markdown(
-                    f'<span style="color:#94a3b8;font-size:0.85rem;">○ {sh["name"]} ({sid.upper()}) — not assigned</span><br>',
-                    unsafe_allow_html=True,
-                )
+                st.markdown(f'<p style="color:#94a3b8;font-size:0.82rem;margin:2px 0">○ <b style="color:{c}">Shipment {pnum}</b>: not assigned</p>', unsafe_allow_html=True)
 
         st.markdown("")
 
-        # Ready-to-submit check
+        # Submit
         if _all_assigned():
-            eval_result = evaluate_solution(routes)
+            eval_result = evaluate_solution(routes, locations, shipments, vehicles)
             if eval_result["feasible"]:
-                st.markdown('<div class="ok-box"><b>✅ All shipments assigned — Ready to Submit!</b></div>', unsafe_allow_html=True)
-                total_d = eval_result["total_distance"]
-                st.markdown(f"**Total distance:** {total_d:.2f} km")
+                st.markdown('<div class="ok-box"><b>✅ All assigned — Ready to Submit!</b></div>', unsafe_allow_html=True)
+                st.markdown(f"**Total distance:** {eval_result['total_distance']:.2f} km")
 
-                if not student_name.strip():
-                    st.warning("Please enter your name before submitting.")
+                if not name.strip():
+                    st.warning("Enter your name first.")
                 else:
-                    if st.button("🚀 Submit Solution", type="primary", use_container_width=True):
-                        ref = get_reference()
-                        score = _compute_score(eval_result, ref["total_distance"])
+                    if st.button("🚀 Submit", type="primary", use_container_width=True):
+                        seed = st.session_state.vrp_seed
+                        n_v  = st.session_state.vrp_num_vehicles
+                        n_s  = st.session_state.vrp_num_shipments
+                        optimal = _cached_solve(seed, n_v, n_s)
+                        score = _compute_score(eval_result["total_distance"], optimal["total_distance"])
                         st.session_state.vrp_evaluation = eval_result
-                        st.session_state.vrp_reference = ref
-                        st.session_state.vrp_score = score
-                        st.session_state.vrp_submitted = True
-                        st.session_state.vrp_student_name = student_name.strip()
+                        st.session_state.vrp_optimal    = optimal
+                        st.session_state.vrp_score      = score
+                        st.session_state.vrp_submitted  = True
+                        st.session_state.vrp_student_name = name.strip()
 
-                        # Save to leaderboard
                         if _DB_AVAILABLE:
                             try:
                                 _db.init_db()
                                 _db.save_solution(
-                                    student_name.strip(),
-                                    eval_result,
-                                    ref["total_distance"],
-                                    score,
+                                    name.strip(), eval_result,
+                                    optimal["total_distance"], score,
+                                    seed=seed,
+                                    num_vehicles=n_v,
+                                    num_shipments=n_s,
                                 )
                             except Exception as e:
                                 st.warning(f"Could not save to leaderboard: {e}")
-                        else:
-                            st.info("Leaderboard not configured (Google Sheets not set up).")
 
-                        st.session_state.vrp_active_tab = 2
+                        st.toast("✅ Submitted! See Solution tab.", icon="🚚")
                         st.rerun()
             else:
-                st.markdown('<div class="warn-box"><b>⚠ All stops assigned but route has violations:</b></div>', unsafe_allow_html=True)
+                st.markdown('<div class="warn-box"><b>⚠ Violations detected:</b></div>', unsafe_allow_html=True)
                 for v in eval_result["violations"][:5]:
                     st.markdown(f'<div class="warn-box">• {v}</div>', unsafe_allow_html=True)
         else:
             remaining = n_total - n_assigned
-            st.markdown(
-                f'<div class="info-box">Assign {remaining} more stop(s) to enable submission.</div>',
-                unsafe_allow_html=True,
-            )
+            st.markdown(f'<div class="info-box">{remaining} more stop(s) to assign.</div>', unsafe_allow_html=True)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — Solution
-# ═══════════════════════════════════════════════════════════════════════════════
 def tab_solution():
     if not st.session_state.vrp_submitted or st.session_state.vrp_evaluation is None:
-        st.info("Complete and submit your routes in the **Plan Routes** tab first.")
+        st.info("Submit your routes in the **Plan Routes** tab first.")
         return
 
+    locations, shipments, vehicles = _sc()
     evaluation = st.session_state.vrp_evaluation
-    ref = st.session_state.vrp_reference or get_reference()
-    score = st.session_state.vrp_score
+    optimal    = st.session_state.vrp_optimal
+    score      = st.session_state.vrp_score
 
     st.header("Solution Analysis")
     st.markdown(f"**Student:** {st.session_state.vrp_student_name}")
 
-    # ── Score display ──────────────────────────────────────────────────────────
-    sc_col1, sc_col2, sc_col3 = st.columns(3)
-    with sc_col1:
+    opt_dist  = optimal["total_distance"]
+    your_dist = evaluation["total_distance"]
+    gap_pct   = (your_dist - opt_dist) / opt_dist * 100 if opt_dist else 0
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
         st.metric("Your Score", f"{score} / 1000")
-    with sc_col2:
-        st.metric("Your Total Distance", f"{evaluation['total_distance']:.2f} km")
-    with sc_col3:
-        ref_dist = ref["total_distance"]
-        gap = round((evaluation["total_distance"] - ref_dist) / ref_dist * 100, 1) if ref_dist else 0
-        st.metric("Reference Distance", f"{ref_dist:.2f} km", delta=f"{gap:+.1f}% vs reference")
+    with c2:
+        st.metric("Your Distance", f"{your_dist:.2f} km")
+    with c3:
+        st.metric("Optimal Distance", f"{opt_dist:.2f} km", delta=f"{gap_pct:+.1f}% gap")
 
     if evaluation["feasible"]:
-        st.success(f"✅ Feasible solution! Score: {score}/1000")
+        st.success(f"✅ Feasible! Score: {score}/1000 — Optimality gap: {gap_pct:.1f}%")
     else:
-        st.error("❌ Infeasible solution — violations detected.")
+        st.error("❌ Infeasible solution.")
         for v in evaluation["violations"]:
             st.markdown(f'<div class="warn-box">• {v}</div>', unsafe_allow_html=True)
 
     st.markdown("---")
-
-    # ── Side-by-side maps ─────────────────────────────────────────────────────
     st.subheader("Route Comparison")
-    map_c1, map_c2 = st.columns(2)
-
-    with map_c1:
+    mc1, mc2 = st.columns(2)
+    with mc1:
         st.markdown("**Your Solution**")
-        fig_yours = draw_map(st.session_state.vrp_routes, "v1", highlight_clickable=False)
-        fig_yours.update_layout(
-            title=f"Your Routes — {evaluation['total_distance']:.2f} km total",
-            height=420,
+        fig_y = draw_map(
+            st.session_state.vrp_routes, list(vehicles.keys())[0],
+            locations, shipments, vehicles, highlight_clickable=False,
         )
-        st.plotly_chart(fig_yours, use_container_width=True, key="sol_yours")
-
-    with map_c2:
-        st.markdown("**Reference Solution (Heuristic)**")
-        fig_ref = draw_map(ref["routes"], "v1", highlight_clickable=False)
-        fig_ref.update_layout(
-            title=f"Reference Routes — {ref_dist:.2f} km total",
-            height=420,
+        fig_y.update_layout(title=f"Your Routes — {your_dist:.2f} km", height=400)
+        st.plotly_chart(fig_y, use_container_width=True, key="sol_yours", config={"displayModeBar": False})
+    with mc2:
+        st.markdown("**Optimal Solution**")
+        fig_o = draw_map(
+            optimal["routes"], list(vehicles.keys())[0],
+            locations, shipments, vehicles, highlight_clickable=False,
         )
-        st.plotly_chart(fig_ref, use_container_width=True, key="sol_ref")
+        fig_o.update_layout(title=f"Optimal Routes — {opt_dist:.2f} km", height=400)
+        st.plotly_chart(fig_o, use_container_width=True, key="sol_optimal", config={"displayModeBar": False})
 
-    # ── Detailed route tables ──────────────────────────────────────────────────
-    st.subheader("Your Route Details")
-    det_c1, det_c2 = st.columns(2)
-
-    for i, (vid, veh) in enumerate(VEHICLES.items()):
-        col = det_c1 if i == 0 else det_c2
+    st.subheader("Route Details")
+    rc1, rc2 = st.columns(2)
+    for i, (vid, veh) in enumerate(vehicles.items()):
+        col = rc1 if i % 2 == 0 else rc2
         with col:
             rr = evaluation["route_results"].get(vid, {})
             stops = rr.get("stops", [])
             d = rr.get("distance", 0.0)
-
             st.markdown(
-                f'<div class="vrp-card route-{vid}">'
+                f'<div class="vrp-card" style="border-left:4px solid {veh["color"]}">'
                 f'<h4 style="color:{veh["color"]}">🚚 {veh["name"]}</h4>'
-                f'<p>Distance: {d:.2f} km | Stops: {len(stops)}</p>'
-                f'</div>',
+                f'<p>Distance: {d:.2f} km | Stops: {len(stops)}</p></div>',
                 unsafe_allow_html=True,
             )
-
             if stops:
-                route_rows = []
+                rows = []
                 load = 0
                 for j, sid in enumerate(stops, 1):
-                    loc = LOCATIONS[sid]
-                    sh = SHIPMENTS[loc["shipment"]]
+                    loc = locations[sid]
+                    sh  = shipments[loc["shipment"]]
                     if loc["type"] == "pickup":
-                        load += sh["demand"]
+                        load += 1
                         action = "Pick up"
                     else:
                         action = "Deliver"
-                        load -= sh["demand"]
-                    route_rows.append({
+                        load -= 1
+                    rows.append({
                         "Step": j,
+                        "Pair": sh["pair_num"],
                         "Action": action,
                         "Location": f"{loc['icon']} {loc['name']}",
-                        "Shipment": sh["name"],
-                        "Load After": load,
+                        "Load": load,
                     })
-                st.dataframe(pd.DataFrame(route_rows), use_container_width=True, hide_index=True)
-            else:
-                st.markdown("*No stops*")
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-    # ── Reference route details ─────────────────────────────────────────────
-    st.subheader("Reference Route Details")
-    ref_c1, ref_c2 = st.columns(2)
-
-    for i, (vid, veh) in enumerate(VEHICLES.items()):
-        col = ref_c1 if i == 0 else ref_c2
-        with col:
-            ref_stops = ref["routes"].get(vid, []) if ref["routes"] else []
-            ref_d = route_distance(ref_stops)
-
-            st.markdown(
-                f'<div class="vrp-card route-{vid}">'
-                f'<h4 style="color:{veh["color"]}">🚚 {veh["name"]} (Reference)</h4>'
-                f'<p>Distance: {ref_d:.2f} km | Stops: {len(ref_stops)}</p>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-
-            if ref_stops:
-                ref_rows = []
-                load = 0
-                for j, sid in enumerate(ref_stops, 1):
-                    loc = LOCATIONS[sid]
-                    sh = SHIPMENTS[loc["shipment"]]
-                    if loc["type"] == "pickup":
-                        load += sh["demand"]
-                        action = "Pick up"
-                    else:
-                        action = "Deliver"
-                        load -= sh["demand"]
-                    ref_rows.append({
-                        "Step": j,
-                        "Action": action,
-                        "Location": f"{loc['icon']} {loc['name']}",
-                        "Shipment": sh["name"],
-                        "Load After": load,
-                    })
-                st.dataframe(pd.DataFrame(ref_rows), use_container_width=True, hide_index=True)
-            else:
-                st.markdown("*No stops*")
-
-    # ── Learning reflection ────────────────────────────────────────────────────
     st.markdown("---")
-    st.subheader("Learning Reflection")
-    st.markdown(
-        """
-        **Key VRP concepts demonstrated:**
+    st.subheader("Learning Points")
+    st.markdown(f"""
+- **Optimality gap of {gap_pct:.1f}%** means your solution travels {gap_pct:.1f}% more than the mathematical optimum.
+- **Precedence constraint**: You must pick up before delivering — this restricts valid route sequences.
+- **Capacity constraint**: Vehicles have limited load — sometimes you must deliver before picking up more.
+- **Clustering**: Grouping geographically nearby pickups/deliveries to the same vehicle reduces travel.
+- **Exact optimum**: For this small problem, the computer checked all feasible route combinations to find the true minimum distance of {opt_dist:.2f} km.
+""")
 
-        - **Routing:** The order of stops matters — a bad sequence can waste many kilometres.
-        - **Capacity constraint:** Vehicles can't carry unlimited cargo. When a vehicle is full, it may need to deliver before picking up more.
-        - **Precedence constraint:** You cannot deliver something you haven't picked up yet. This restricts which stop sequences are feasible.
-        - **Optimisation:** With 5 shipments and 2 vehicles, there are many possible route combinations. The reference solver enumerates all shipment-to-vehicle assignments and applies a nearest-neighbour heuristic to find a good (but not necessarily optimal) solution.
-        - **Trade-off:** Splitting shipments evenly between vehicles isn't always best — sometimes assigning more stops to one vehicle reduces total travel if clusters exist.
-        """
-    )
-
-    if st.button("🔄 Play Again", type="secondary"):
-        st.session_state.vrp_routes = {"v1": [], "v2": []}
-        st.session_state.vrp_submitted = False
-        st.session_state.vrp_evaluation = None
-        st.session_state.vrp_score = 0
-        st.session_state.vrp_active_tab = 1
+    if st.button("🔄 New Game", type="secondary"):
+        st.session_state.vrp_game_started = False
         st.rerun()
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# TAB 4 — Leaderboard
-# ═══════════════════════════════════════════════════════════════════════════════
 def tab_leaderboard():
-    st.header("Leaderboard — Top Feasible Solutions")
-
+    st.header("Leaderboard")
     if not _DB_AVAILABLE:
-        st.warning(
-            "Leaderboard is not available: Google Sheets credentials are not configured. "
-            "To enable the leaderboard, add `.streamlit/secrets.toml` with `gcp_json` and `[sheet]` settings."
-        )
+        st.warning("Leaderboard not configured (Google Sheets not set up).")
         return
-
     try:
         _db.init_db()
-    except Exception as e:
-        st.error(f"Failed to initialise leaderboard: {e}")
-        return
-
-    col_refresh, _ = st.columns([1, 5])
-    with col_refresh:
-        if st.button("🔄 Refresh", use_container_width=True):
-            st.rerun()
-
-    try:
         data = _db.get_leaderboard(top_n=50)
     except Exception as e:
         st.error(f"Failed to load leaderboard: {e}")
         return
 
+    if st.button("🔄 Refresh"):
+        st.rerun()
+
     if not data:
-        st.info("No feasible solutions submitted yet. Be the first!")
+        st.info("No submissions yet. Be the first!")
         return
 
-    # Medals for top 3
     medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-
     rows = []
     for entry in data:
         rank = entry["rank"]
-        medal = medals.get(rank, str(rank))
         rows.append({
-            "Rank": medal,
+            "Rank": medals.get(rank, str(rank)),
             "Name": entry["student_name"],
             "Score": int(entry["score"]),
             "Distance (km)": round(entry["total_distance"], 2),
-            "Ref. Distance": round(entry["reference_distance"], 2),
-            "Gap (%)": f"{entry['gap_pct']:+.1f}%",
+            "Optimal (km)": round(entry["reference_distance"], 2),
+            "Gap": f"{entry['gap_pct']:+.1f}%",
             "Plays": entry["plays"],
-            "Best At": entry["best_at"],
         })
-
-    df = pd.DataFrame(rows)
-    st.dataframe(df, use_container_width=True, hide_index=True, height=600)
-
-    # Highlight current student if submitted
-    if st.session_state.vrp_submitted and st.session_state.vrp_student_name:
-        name = st.session_state.vrp_student_name.strip().lower()
-        for entry in data:
-            if entry["student_name"].strip().lower() == name:
-                st.success(
-                    f"Your best score: **{int(entry['score'])}** (Rank #{entry['rank']}) — "
-                    f"{entry['total_distance']:.2f} km"
-                )
-                break
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=500)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 # MAIN
-# ═══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 def main():
-    st.title("🚚 Pickup & Delivery VRP Game — IE105000")
-    st.markdown(
-        "Plan efficient vehicle routes for urban package delivery. "
-        "Apply **Operations Research** concepts: routing, capacity, precedence, and optimisation."
-    )
+    if not st.session_state.vrp_game_started:
+        show_start_screen()
+        return
 
-    # Active tab index control (for auto-navigation after submit)
-    active_tab_idx = st.session_state.get("vrp_active_tab", 0)
-
-    tab_labels = ["📦 Scenario", "🚚 Plan Routes", "📊 Solution", "🏆 Leaderboard"]
-    tabs = st.tabs(tab_labels)
-
-    with tabs[0]:
-        tab_scenario()
-
-    with tabs[1]:
-        # Reset auto-navigation flag when user is on Plan tab
-        tab_plan()
-
-    with tabs[2]:
-        tab_solution()
-
-    with tabs[3]:
-        tab_leaderboard()
-
-    # Auto-navigate to solution tab after submit via JavaScript
-    if st.session_state.get("vrp_active_tab") == 2 and st.session_state.vrp_submitted:
-        st.session_state.vrp_active_tab = 0  # reset so it doesn't keep switching
-        # Streamlit doesn't support programmatic tab switching directly,
-        # but show a prominent banner pointing to the Solution tab
-        st.toast("✅ Solution submitted! Check the 📊 Solution tab.", icon="🚚")
+    tabs = st.tabs(["📦 Scenario", "🚚 Plan Routes", "📊 Solution", "🏆 Leaderboard"])
+    with tabs[0]: tab_scenario()
+    with tabs[1]: tab_plan()
+    with tabs[2]: tab_solution()
+    with tabs[3]: tab_leaderboard()
 
 
 if __name__ == "__main__" or True:

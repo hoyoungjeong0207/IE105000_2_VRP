@@ -1,92 +1,87 @@
-"""engine.py — Route evaluation for the VRP game."""
+"""engine.py — Route evaluation for VRP game (scenario passed as parameters)."""
 import math
-from scenario import DEPOT, LOCATIONS, SHIPMENTS, VEHICLES
+from scenario import DEPOT
 
 
 def dist(a, b):
     return math.sqrt((a["x"] - b["x"]) ** 2 + (a["y"] - b["y"]) ** 2)
 
 
-def get_loc(loc_id):
-    return DEPOT if loc_id == "depot" else LOCATIONS[loc_id]
+def get_loc(loc_id, locations):
+    if loc_id == "depot":
+        return DEPOT
+    return locations[loc_id]
 
 
-def route_distance(stop_ids):
-    """Total distance of depot→stops→depot."""
-    full = ["depot"] + list(stop_ids) + ["depot"]
-    return sum(dist(get_loc(full[i]), get_loc(full[i + 1])) for i in range(len(full) - 1))
+def route_distance(stop_ids, locations):
+    if not stop_ids:
+        return 0.0
+    pts = [DEPOT] + [locations[s] for s in stop_ids] + [DEPOT]
+    return sum(dist(pts[i], pts[i + 1]) for i in range(len(pts) - 1))
 
 
-def check_route(stop_ids, vehicle_id):
-    """Return (feasible, violations, load_profile) for a single vehicle route."""
-    capacity = VEHICLES[vehicle_id]["capacity"]
-    load = 0
-    picked = set()
+def check_route(stop_ids, vehicle_id, locations, shipments, vehicles):
+    """Returns (feasible, violations, load_profile)."""
+    cap = vehicles[vehicle_id]["capacity"]
+    pickup_of = {sh["delivery"]: sh["pickup"] for sh in shipments.values()}
     violations = []
-    load_profile = [0]
-
+    load = 0
+    load_profile = []
+    visited = set()
     for sid in stop_ids:
-        loc = LOCATIONS[sid]
-        shipment_id = loc["shipment"]
+        loc = locations[sid]
+        if loc["type"] == "delivery":
+            pid = pickup_of.get(sid)
+            if pid and pid not in visited:
+                violations.append(f"Delivery {loc['name']} before its pickup")
         if loc["type"] == "pickup":
-            load += SHIPMENTS[shipment_id]["demand"]
-            picked.add(shipment_id)
-            if load > capacity:
-                violations.append(f"Capacity exceeded at {loc['name']} (load={load})")
-        else:  # delivery
-            if shipment_id not in picked:
-                violations.append(f"Delivered {loc['name']} before picking up shipment {shipment_id}")
-            else:
-                load -= SHIPMENTS[shipment_id]["demand"]
+            load += shipments[loc["shipment"]]["demand"]
+        else:
+            load -= shipments[loc["shipment"]]["demand"]
+        if load > cap:
+            violations.append(f"Over capacity ({load}/{cap}) at {loc['name']}")
         load_profile.append(load)
+        visited.add(sid)
+    return (len(violations) == 0, violations, load_profile)
 
-    return len(violations) == 0, violations, load_profile
 
-
-def evaluate_solution(routes):
-    """
-    routes: {"v1": [stop_ids], "v2": [stop_ids]}
-    Returns full evaluation dict.
-    """
-    all_stops = [s for stops in routes.values() for s in stops]
-    covered = {s for s in all_stops if s in LOCATIONS}
-
-    missing = []
-    for sid, sh in SHIPMENTS.items():
-        if sh["pickup"] not in covered:
-            missing.append(f"Shipment {sid} ({sh['name']}): pickup not assigned")
-        if sh["delivery"] not in covered:
-            missing.append(f"Shipment {sid} ({sh['name']}): delivery not assigned")
-
-    # Check duplicates
-    duplicates = []
-    seen = set()
-    for s in all_stops:
-        if s in seen:
-            duplicates.append(f"{LOCATIONS[s]['name']} assigned to multiple vehicles")
-        seen.add(s)
-
-    total_dist = 0
+def evaluate_solution(routes, locations, shipments, vehicles):
+    """Full feasibility check and distance computation."""
+    violations = []
     route_results = {}
-    all_violations = list(missing) + list(duplicates)
+    total_dist = 0.0
 
     for vid, stop_ids in routes.items():
-        feasible, viol, load_profile = check_route(stop_ids, vid)
-        d = route_distance(stop_ids)
+        ok, viol, lp = check_route(stop_ids, vid, locations, shipments, vehicles)
+        d = route_distance(stop_ids, locations)
+        total_dist += d
         route_results[vid] = {
             "stops": stop_ids,
-            "distance": d,
-            "feasible": feasible,
+            "feasible": ok,
             "violations": viol,
-            "load_profile": load_profile,
-            "n_stops": len(stop_ids),
+            "distance": d,
+            "load_profile": lp,
         }
-        total_dist += d
-        all_violations.extend(viol)
+        violations.extend(viol)
+
+    # Check coverage
+    for sid, sh in shipments.items():
+        for loc_id in [sh["pickup"], sh["delivery"]]:
+            count = sum(1 for stops in routes.values() if loc_id in stops)
+            if count == 0:
+                violations.append(f"Stop {loc_id} not assigned")
+            elif count > 1:
+                violations.append(f"Stop {loc_id} assigned to multiple vehicles")
+
+        # Pickup and delivery must be in same vehicle
+        p_in = [vid for vid, stops in routes.items() if sh["pickup"] in stops]
+        d_in = [vid for vid, stops in routes.items() if sh["delivery"] in stops]
+        if p_in and d_in and p_in[0] != d_in[0]:
+            violations.append(f"Shipment {sid}: pickup and delivery in different vehicles")
 
     return {
+        "feasible": len(violations) == 0,
+        "violations": violations,
         "total_distance": total_dist,
-        "feasible": len(all_violations) == 0,
-        "violations": all_violations,
         "route_results": route_results,
     }

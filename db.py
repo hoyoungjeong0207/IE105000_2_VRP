@@ -22,6 +22,7 @@ HEADERS = [
     "id", "student_name", "played_at",
     "total_distance", "reference_distance", "gap_pct", "score",
     "feasible", "v1_route", "v2_route", "n_violations",
+    "seed", "num_vehicles", "num_shipments",
 ]
 
 
@@ -48,7 +49,8 @@ def init_db():
         ws.append_row(HEADERS, value_input_option="RAW")
 
 
-def save_solution(student_name, evaluation, reference_dist, score):
+def save_solution(student_name, evaluation, reference_dist, score,
+                  seed=None, num_vehicles=None, num_shipments=None):
     ws = _ws()
     rows = ws.get_all_records()
     new_id = max((int(r["id"]) for r in rows), default=0) + 1
@@ -67,6 +69,9 @@ def save_solution(student_name, evaluation, reference_dist, score):
         1 if evaluation["feasible"] else 0,
         v1_route, v2_route,
         len(evaluation["violations"]),
+        seed if seed is not None else "",
+        num_vehicles if num_vehicles is not None else "",
+        num_shipments if num_shipments is not None else "",
     ]
     ws.append_row(row, value_input_option="RAW")
 
