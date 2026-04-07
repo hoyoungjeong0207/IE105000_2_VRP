@@ -79,8 +79,10 @@ def save_solution(student_name, evaluation, reference_dist, score,
         num_shipments if num_shipments is not None else "",
     ]
     ws.append_row(row, value_input_option="RAW")
+    get_leaderboard.clear()
 
 
+@st.cache_data(ttl=60)
 def get_leaderboard(top_n=50):
     rows = _ws().get_all_records()
     if not rows:

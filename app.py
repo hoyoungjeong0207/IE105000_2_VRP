@@ -709,6 +709,8 @@ def tab_leaderboard():
         return
 
     if st.button("🔄 Refresh"):
+        if _DB_AVAILABLE:
+            _db.get_leaderboard.clear()
         st.rerun()
 
     if not data:
