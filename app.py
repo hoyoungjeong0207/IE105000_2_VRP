@@ -14,6 +14,12 @@ from scenario import (
 )
 from solver import solve
 
+try:
+    import db as _db
+    _DB_AVAILABLE = True
+except Exception:
+    _DB_AVAILABLE = False
+
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="VRP Pickup & Delivery — IE105000",
@@ -99,6 +105,7 @@ def _init_state():
         "vrp_optimal":        None,
         "vrp_score":          0,
         "vrp_student_name":   "",
+        "vrp_student_id":     "",
         "vrp_goto_solution":  False,
     }
     for k, v in defaults.items():
@@ -349,7 +356,7 @@ def _render_route_panel(vehicle_id):
         st.markdown('<div class="ok-box">✓ Valid so far</div>', unsafe_allow_html=True)
 
 
-def _start_game(num_vehicles, num_shipments, name):
+def _start_game(num_vehicles, num_shipments):
     seed = random.randint(0, 99999)
     locations, shipments, vehicles = generate_scenario(num_vehicles, num_shipments, seed)
     st.session_state.vrp_num_vehicles   = num_vehicles
@@ -364,7 +371,6 @@ def _start_game(num_vehicles, num_shipments, name):
     st.session_state.vrp_evaluation     = None
     st.session_state.vrp_optimal        = None
     st.session_state.vrp_score          = 0
-    st.session_state.vrp_student_name   = name.strip()
     st.session_state.vrp_game_started   = True
 
 
@@ -376,18 +382,15 @@ def _start_game(num_vehicles, num_shipments, name):
 def tab_plan():
     # ── Game settings panel (always visible at top) ──────────────────────────
     with st.expander("⚙️ Game Settings", expanded=not st.session_state.vrp_game_started):
-        s_col1, s_col2, s_col3, s_col4 = st.columns([2, 2, 2, 1])
+        s_col1, s_col2, s_col3 = st.columns([2, 2, 1])
         with s_col1:
             num_vehicles = st.slider("Vehicles", 1, 3, st.session_state.vrp_num_vehicles, key="cfg_vehicles")
         with s_col2:
             num_shipments = st.slider("Shipments", 2, 6, st.session_state.vrp_num_shipments, key="cfg_shipments")
         with s_col3:
-            name_cfg = st.text_input("Your Name", value=st.session_state.vrp_student_name,
-                                     placeholder="Enter your name...", key="cfg_name")
-        with s_col4:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🚀 Start", type="primary", use_container_width=True, key="cfg_start"):
-                _start_game(num_vehicles, num_shipments, name_cfg)
+                _start_game(num_vehicles, num_shipments)
                 st.rerun()
 
     if not st.session_state.vrp_game_started:
@@ -549,11 +552,19 @@ def tab_plan():
         if eval_result["feasible"]:
             st.markdown('<div class="ok-box"><b>✅ All assigned — Ready to Submit!</b></div>', unsafe_allow_html=True)
             st.markdown(f"**Total distance:** {eval_result['total_distance']:.2f} km")
-            student_name = st.session_state.vrp_student_name
-            if not student_name.strip():
-                st.warning("Enter your name in Game Settings first.")
+            sc1, sc2 = st.columns(2)
+            with sc1:
+                submit_name = st.text_input("Your Name", value=st.session_state.vrp_student_name,
+                                            placeholder="홍길동", key="submit_name")
+            with sc2:
+                submit_id = st.text_input("Student ID", value=st.session_state.vrp_student_id,
+                                          placeholder="2024XXXXXX", key="submit_id")
+            if not submit_name.strip():
+                st.warning("이름을 입력해주세요.")
             else:
                 if st.button("🚀 Submit", type="primary", use_container_width=True):
+                    st.session_state.vrp_student_name = submit_name.strip()
+                    st.session_state.vrp_student_id   = submit_id.strip()
                     seed = st.session_state.vrp_seed
                     n_v  = st.session_state.vrp_num_vehicles
                     n_s  = st.session_state.vrp_num_shipments
@@ -564,6 +575,17 @@ def tab_plan():
                     st.session_state.vrp_score      = score
                     st.session_state.vrp_submitted       = True
                     st.session_state.vrp_goto_solution   = True
+                    if _DB_AVAILABLE:
+                        try:
+                            _db.init_db()
+                            _db.save_solution(
+                                submit_name.strip(), eval_result,
+                                optimal["total_distance"], score,
+                                student_id=submit_id.strip(),
+                                seed=seed, num_vehicles=n_v, num_shipments=n_s,
+                            )
+                        except Exception as e:
+                            st.warning(f"리더보드 저장 실패: {e}")
                     st.rerun()
         else:
             st.markdown('<div class="warn-box"><b>⚠ Violations detected:</b></div>', unsafe_allow_html=True)
@@ -676,7 +698,7 @@ def tab_solution():
 
 
 def tab_leaderboard():
-    st.header("Leaderboard")
+    st.header("🏆 Leaderboard")
     if not _DB_AVAILABLE:
         st.warning("Leaderboard not configured (Google Sheets not set up).")
         return
@@ -694,6 +716,8 @@ def tab_leaderboard():
         st.info("No submissions yet. Be the first!")
         return
 
+    st.caption("동점 시 고객 수(Shipments) 많은 순 → 차량 수(Vehicles) 많은 순으로 정렬")
+
     medals = {1: "🥇", 2: "🥈", 3: "🥉"}
     rows = []
     for entry in data:
@@ -702,8 +726,9 @@ def tab_leaderboard():
             "Rank": medals.get(rank, str(rank)),
             "Name": entry["student_name"],
             "Score": int(entry["score"]),
+            "Shipments": entry["num_shipments"],
+            "Vehicles": entry["num_vehicles"],
             "Distance (km)": round(entry["total_distance"], 2),
-            "Optimal (km)": round(entry["reference_distance"], 2),
             "Gap": f"{entry['gap_pct']:+.1f}%",
             "Plays": entry["plays"],
         })
@@ -728,9 +753,10 @@ def main():
         </script>
         """, height=0)
 
-    tabs = st.tabs(["🚚 Plan Routes", "📊 Solution"])
+    tabs = st.tabs(["🚚 Plan Routes", "📊 Solution", "🏆 Leaderboard"])
     with tabs[0]: tab_plan()
     with tabs[1]: tab_solution()
+    with tabs[2]: tab_leaderboard()
 
 
 if __name__ == "__main__" or True:
