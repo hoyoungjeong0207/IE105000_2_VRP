@@ -702,7 +702,6 @@ def tab_leaderboard():
         st.warning("Leaderboard not configured (Google Sheets not set up).")
         return
     try:
-        _db.init_db()
         data = _db.get_leaderboard(top_n=50)
     except Exception as e:
         st.error(f"Failed to load leaderboard: {e}")

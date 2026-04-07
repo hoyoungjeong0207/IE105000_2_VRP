@@ -37,6 +37,7 @@ def _get_spreadsheet():
     return client.open_by_key(st.secrets["sheet"]["id"])
 
 
+@st.cache_resource
 def _ws():
     return _get_spreadsheet().worksheet(SHEET_NAME)
 
@@ -57,9 +58,9 @@ def init_db():
 def save_solution(student_name, evaluation, reference_dist, score,
                   student_id="", seed=None, num_vehicles=None, num_shipments=None):
     ws = _ws()
-    rows = ws.get_all_records()
-    new_id = max((int(r["id"]) for r in rows), default=0) + 1
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now(timezone.utc)
+    new_id = int(now.timestamp())
+    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
     rr = evaluation["route_results"]
     v1_route = " → ".join(rr["v1"]["stops"]) if "v1" in rr else ""
@@ -67,7 +68,7 @@ def save_solution(student_name, evaluation, reference_dist, score,
     gap = round((evaluation["total_distance"] - reference_dist) / reference_dist * 100, 1) if reference_dist else 0
 
     row = [
-        new_id, student_id.strip(), student_name.strip(), now,
+        new_id, student_id.strip(), student_name.strip(), now_str,
         round(evaluation["total_distance"], 2),
         round(reference_dist, 2),
         gap, score,
@@ -82,7 +83,7 @@ def save_solution(student_name, evaluation, reference_dist, score,
     get_leaderboard.clear()
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=120)
 def get_leaderboard(top_n=50):
     rows = _ws().get_all_records()
     if not rows:
