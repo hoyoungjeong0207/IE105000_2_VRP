@@ -218,10 +218,10 @@ def draw_map(routes, active_vehicle, locations, shipments, vehicles, highlight_c
             border_width = 1
 
         hover = (
-            f"<b>{label}: {loc['icon']} {loc['name']}</b><br>"
-            f"{'Pickup' if loc['type'] == 'pickup' else 'Delivery'} for Shipment {pnum}<br>"
+            f"<b>{label}</b><br>"
+            f"{'Pickup' if loc['type'] == 'pickup' else 'Delivery'} — Shipment {pnum}<br>"
             f"Coords: ({loc['x']}, {loc['y']})"
-            + (f"<br>→ Assigned to {vehicles[assigned[loc_id]]['name']}" if loc_id in assigned else "")
+            + (f"<br>→ {vehicles[assigned[loc_id]]['name']}" if loc_id in assigned else "")
         )
 
         fig.add_trace(go.Scatter(
