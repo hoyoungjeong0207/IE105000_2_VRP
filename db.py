@@ -47,6 +47,10 @@ def init_db():
     if SHEET_NAME not in existing:
         ws = sh.add_worksheet(SHEET_NAME, rows=2000, cols=len(HEADERS) + 3)
         ws.append_row(HEADERS, value_input_option="RAW")
+    else:
+        ws = sh.worksheet(SHEET_NAME)
+        if not ws.row_values(1):
+            ws.append_row(HEADERS, value_input_option="RAW")
 
 
 def save_solution(student_name, evaluation, reference_dist, score,
