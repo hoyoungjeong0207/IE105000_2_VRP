@@ -266,9 +266,10 @@ def draw_map(routes, active_vehicle, locations, shipments, vehicles, highlight_c
         dx = 0.3 if loc["x"] < 1.5 else (-0.3 if loc["x"] > 8.5 else 0)
         pnum = loc["pair_num"]
         color = pair_color(pnum)
+        tag = "P" if loc["type"] == "pickup" else "D"
         annotations.append(dict(
             x=loc["x"] + dx, y=loc["y"] + dy,
-            text=f"<b>{loc['icon']} {loc['name']}</b>",
+            text=f"<b>{pnum}{tag}</b>",
             showarrow=False,
             font=dict(size=9, color=color),
             bgcolor="rgba(15,23,42,0.85)", borderpad=2,
@@ -318,10 +319,10 @@ def _render_route_panel(vehicle_id):
             load += 1
             picked.add(sh_id)
             if load > cap:
-                violations_local.append(f"Over capacity at {loc['name']}")
+                violations_local.append(f"Over capacity at {loc['pair_num']}P")
         else:
             if sh_id not in picked:
-                violations_local.append(f"Delivery before pickup: {loc['name']}")
+                violations_local.append(f"Delivery before pickup: {loc['pair_num']}D")
             else:
                 load -= 1
 
@@ -449,9 +450,7 @@ def tab_plan():
     # Pair legend
     items = "".join(
         f'<span style="color:{pair_color(sh["pair_num"])};font-weight:bold;white-space:nowrap">'
-        f'{sh["pair_num"]}P/{sh["pair_num"]}D: '
-        f'{locations[sh["pickup"]]["icon"]}{locations[sh["pickup"]]["name"]} → '
-        f'{locations[sh["delivery"]]["icon"]}{locations[sh["delivery"]]["name"]}'
+        f'{sh["pair_num"]}P → {sh["pair_num"]}D'
         f'</span>'
         for sh in shipments.values()
     )
@@ -485,7 +484,8 @@ def tab_plan():
                     elif loc["type"] == "delivery":
                         pid = shipments[loc["shipment"]]["pickup"]
                         if pid not in cur_route:
-                            st.error(f"Pick up '{locations[pid]['name']}' first.")
+                            pnum = locations[pid]["pair_num"]
+                            st.error(f"Pick up {pnum}P first.")
                         else:
                             st.session_state.vrp_routes[av].append(loc_id)
                             st.rerun()
@@ -675,9 +675,8 @@ def tab_solution():
                         load -= 1
                     rows.append({
                         "Step": j,
-                        "Pair": sh["pair_num"],
+                        "Stop": f"{sh['pair_num']}{'P' if loc['type'] == 'pickup' else 'D'}",
                         "Action": action,
-                        "Location": f"{loc['icon']} {loc['name']}",
                         "Load": load,
                     })
                 st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
